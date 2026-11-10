@@ -1,0 +1,91 @@
+<!doctype html>
+<!-- Copyright (c) 2026 Phosphoros Research and contributors.
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
+SPDX-License-Identifier: MPL-2.0 -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent workspace · Threadlamp</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="brand.css">
+</head>
+<body data-mobile-view="agents">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">↻</span><span class="product-lockup"><strong>Threadlamp</strong><span class="publisher">Phosphoros Research</span></span><span class="brand-divider" aria-hidden="true">/</span><span class="brand-page">Agent workspace</span></div>
+    <div class="top-actions"><span id="connection" role="status">Connecting…</span><button id="refresh" class="icon-button" aria-label="Refresh status" title="Refresh status">↻</button><button id="activity-toggle" aria-haspopup="dialog" aria-controls="activity-drawer">Activity <span id="activity-count" class="count-badge" hidden>0</span></button><button id="preferences-toggle" class="quiet" aria-haspopup="dialog" aria-controls="preferences-dialog">Settings</button></div>
+  </header>
+  <div class="fleet-bar" aria-label="Agent totals and quick filters">
+    <span class="fleet-label">OVERVIEW</span>
+    <button data-filter="all" aria-pressed="true"><span class="status-dot"></span><strong id="total">0</strong> connected</button>
+    <button data-filter="running" aria-pressed="false"><strong id="working">0</strong> working</button>
+    <button data-filter="waiting" aria-pressed="false"><span class="status-dot waiting"></span><strong id="waiting">0</strong> need input</button>
+    <button data-filter="errors" aria-pressed="false"><span class="status-dot error"></span><strong id="errors">0</strong> errors</button>
+    <span id="version" class="version">This Chrome profile</span>
+  </div>
+  <main class="layout">
+    <section class="agents-column" aria-labelledby="agents-title">
+      <div class="section-title"><h1 id="agents-title">Agents <span id="agent-list-count" class="count-badge">0</span></h1><span class="small muted">Attention first</span></div>
+      <div class="agent-filters"><label class="sr-only" for="search">Find a project or chat</label><input id="search" type="search" placeholder="Find a project or chat…"><label class="sr-only" for="filter">Filter agents</label><select id="filter"><option value="all">All agents</option><option value="running">Running</option><option value="waiting">Waiting for input</option><option value="sleeping">Sleeping</option><option value="paused">Paused</option><option value="errors">Needs attention</option><option value="offline">Offline / unavailable</option></select></div>
+      <div id="agents" class="agent-list"></div>
+      <div class="sidebar-footer"><span class="status-dot"></span> Live updates <span id="updated" class="muted"></span></div>
+    </section>
+    <section class="inspector" aria-labelledby="agent-title">
+      <div id="empty" class="empty"><span class="empty-mark" aria-hidden="true">↻</span><h2>Your workspace is ready</h2><p>Open a ChatGPT conversation with the extension enabled. Your agents will appear in the list.</p><p class="small">Select an agent to view its status and controls.</p></div>
+      <div id="detail" hidden>
+        <div class="workspace-header">
+          <button id="back-to-agents" class="text-button mobile-only">← All agents</button>
+          <div class="section-title"><div class="agent-heading"><p class="eyebrow">AGENT WORKSPACE</p><h2 id="agent-title"></h2><p id="chat-title" class="chat-title muted"></p></div><button id="open-chat" class="quiet">Open chat ↗</button></div>
+          <div class="status-strip"><span id="agent-phase" class="pill"></span><span id="agent-count" class="small muted"></span><div class="run-actions"><button data-action="pause">Pause</button><button data-action="resume">Resume</button><button data-action="next_cycle">Next cycle</button><button data-action="stop" class="danger">Stop</button></div></div>
+          <p id="agent-detail" class="status-detail"></p>
+          <div class="status-meta"><p id="agent-timing" class="muted small"></p><button id="review-input" class="text-button" hidden>Reply to request →</button><details class="identity"><summary>Chat link</summary><p id="agent-url" class="url"></p></details></div>
+          <p id="agent-guard" class="guard"></p>
+        </div>
+        <div class="workspace-tabs" role="tablist" aria-label="Agent tools">
+          <button id="tab-queue" role="tab" aria-selected="true" aria-controls="panel-queue" data-panel="queue">Prompt queue <span id="queue-badge" class="count-badge" hidden>1</span></button>
+          <button id="tab-reply" role="tab" aria-selected="false" aria-controls="panel-reply" data-panel="reply" tabindex="-1">Reply <span id="reply-badge" class="count-badge alert" hidden>1</span></button>
+          <button id="tab-run" role="tab" aria-selected="false" aria-controls="panel-run" data-panel="run" tabindex="-1">Run setup</button>
+          <button id="tab-heartbeat" role="tab" aria-selected="false" aria-controls="panel-heartbeat" data-panel="heartbeat" tabindex="-1">Heartbeat</button>
+          <button id="tab-server" role="tab" aria-selected="false" aria-controls="panel-server" data-panel="server" tabindex="-1">Server</button>
+        </div>
+        <div class="panel-scroll">
+          <section id="panel-queue" role="tabpanel" aria-labelledby="tab-queue" tabindex="0" class="tool-panel">
+            <div class="panel-heading"><div><h3>Guide the next round</h3><p class="muted">Add instructions while your agent keeps working.</p></div><span class="panel-symbol" aria-hidden="true">↳</span></div>
+            <div class="context-strip"><span class="status-dot"></span><p id="queue-state">No instructions queued.</p></div>
+            <form id="queue-form"><label for="queued">Next-round instructions</label><textarea id="queued" rows="6" maxlength="8000" placeholder="What should this agent focus on next?" aria-describedby="queue-help"></textarea><div class="editor-footer"><span id="queue-help">One pending prompt per agent.</span><span id="queued-count">0 / 8,000</span></div><div class="actions"><button data-action="queue" class="primary">Queue prompt <span aria-hidden="true">↗</span></button><button data-action="cancel_queue" class="quiet">Cancel queued prompt</button></div></form>
+            <details id="queue-preview" class="disclosure" hidden><summary>View currently queued prompt</summary><p id="queue-pending" class="preserve-text"></p></details>
+            <p class="footnote">Delivered on the next automatic send. Queueing does not approve a request or resume a paused agent.</p>
+          </section>
+          <section id="panel-reply" role="tabpanel" aria-labelledby="tab-reply" tabindex="0" class="tool-panel" hidden>
+            <div class="panel-heading"><div><h3>Keep the work moving</h3><p class="muted">Respond when your agent needs a decision.</p></div></div>
+            <div class="request-card"><span class="eyebrow">INPUT REQUEST</span><p id="input-brief">No active input request.</p></div>
+            <form id="reply-form"><label for="reply">Your reply</label><textarea id="reply" rows="5" maxlength="4000" placeholder="Give your agent a clear next step…"></textarea><div class="actions"><button data-action="reply" class="primary">Send reply ↗</button><button data-action="approve" class="quiet">Send configured approval</button></div></form><p id="approval-preview" class="muted small"></p><p class="footnote">Replies are available during an input request. Open the chat to read the full conversation.</p>
+          </section>
+          <section id="panel-run" role="tabpanel" aria-labelledby="tab-run" tabindex="0" class="tool-panel" hidden>
+            <div class="panel-heading"><div><h3>Set up a run</h3><p class="muted">Choose how this agent continues its work.</p></div></div>
+            <form id="run-form"><div class="form-grid"><div class="span-all"><label for="message">Automatic follow-up message</label><textarea id="message" rows="3" maxlength="4000" required></textarea></div><div><label for="limit">Message limit</label><input id="limit" type="number" min="1" max="1000" required></div><label class="check"><input id="rollover" type="checkbox">Continue in a new project chat at the conversation limit</label></div><div class="actions"><button data-action="start_logic" class="primary">Start Logic Mode</button><button data-action="resume_logic">Resume after reload</button><button data-action="start_loop">Start simple loop</button></div></form>
+            <div class="quick-tools"><h4>One-time messages</h4><p class="muted small">Available when the agent is stopped and its composer is clear.</p><div class="actions"><button data-action="continue">Send Continue</button><button data-action="status">Send Status</button></div></div>
+          </section>
+          <section id="panel-heartbeat" role="tabpanel" aria-labelledby="tab-heartbeat" tabindex="0" class="tool-panel" hidden>
+            <div class="panel-heading"><div><h3>Work on a schedule</h3><p class="muted">Wake this agent for recurring tasks.</p></div></div><p id="hb-status" class="context-strip">Loading…</p>
+            <form id="heartbeat-form"><div class="form-grid"><div><label for="hb-kind">Schedule</label><select id="hb-kind"><option value="interval">Every N minutes</option><option value="daily">Specific times and weekdays</option></select></div><div id="hb-interval-field"><label for="hb-interval">Interval in minutes</label><input id="hb-interval" type="number" min="1" max="10080" value="60"></div><div id="hb-daily-fields" class="span-all" hidden><label for="hb-times">Daily times (24-hour, comma separated)</label><input id="hb-times" value="09:00, 15:00"><fieldset id="hb-days"><legend>Weekdays</legend><label><input type="checkbox" value="1" checked>Mon</label><label><input type="checkbox" value="2" checked>Tue</label><label><input type="checkbox" value="3" checked>Wed</label><label><input type="checkbox" value="4" checked>Thu</label><label><input type="checkbox" value="5" checked>Fri</label><label><input type="checkbox" value="6">Sat</label><label><input type="checkbox" value="0">Sun</label></fieldset></div><div><label for="hb-timezone">Timezone</label><input id="hb-timezone" value="America/Chicago" required></div><div><label for="hb-limit">Follow-ups per cycle</label><input id="hb-limit" type="number" min="1" max="1000" value="5" required></div><div class="span-all"><label for="hb-prompt">Heartbeat prompt</label><textarea id="hb-prompt" rows="3" maxlength="4000" required></textarea></div></div><button data-action="heartbeat_save" class="primary">Save &amp; enable heartbeat</button></form><div class="actions secondary-actions"><button data-action="heartbeat_run">Run now</button><button data-action="heartbeat_pause">Pause schedule</button><button data-action="heartbeat_resume">Resume schedule</button><button data-action="heartbeat_disable" class="quiet">Disable</button></div>
+          </section>
+          <section id="panel-server" role="tabpanel" aria-labelledby="tab-server" tabindex="0" class="tool-panel" hidden>
+            <div class="panel-heading"><div><h3>Project server</h3><p class="muted">Manage this agent’s existing project connection.</p></div></div><p id="server-status" class="context-strip">Loading…</p><div class="actions"><button data-action="server_setup" class="primary">Set up</button><button data-action="server_recover">Recover</button><button data-action="server_assign">Assign this chat</button><button data-action="server_enable">Enable</button><button data-action="server_disable" class="quiet">Disable</button></div><div id="uncertain" class="request-card" hidden><h4>Review uncertain deliveries</h4><p>Inspect the chat before resolving an event.</p><label for="server-event">Event</label><select id="server-event"></select><div class="actions"><button data-action="server_resolve" data-resolution="delivered">Already delivered</button><button data-action="server_resolve" data-resolution="retry">Not sent — retry</button></div></div><p class="footnote">This connection is for your project’s server. The dashboard itself runs inside the extension.</p>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="app-status"><p id="notice" role="status" aria-live="polite">Ready</p><span>Local workspace · This Chrome profile</span></footer>
+  <dialog id="activity-drawer" class="drawer" aria-labelledby="activity-title">
+    <div class="dialog-header"><div><p class="eyebrow">WORKSPACE FEED</p><h2 id="activity-title">Activity</h2></div><button data-close="activity-drawer" class="icon-button" aria-label="Close activity">×</button></div>
+    <div class="activity-filters"><label class="sr-only" for="event-scope">Activity scope</label><select id="event-scope"><option value="all">All agents</option><option value="selected">Selected agent</option></select><label class="sr-only" for="event-kind">Activity type</label><select id="event-kind"><option value="all">All updates</option><option value="attention">Input &amp; errors</option></select></div>
+    <div id="events" class="event-list"></div><div class="dialog-footer"><label class="check"><input id="show-dismissed" type="checkbox">Show dismissed</label><button id="clear-history" class="text-button">Clear history</button></div>
+  </dialog>
+  <dialog id="preferences-dialog" class="preferences-dialog" aria-labelledby="preferences-title"><div class="dialog-header"><div><p class="eyebrow">PREFERENCES</p><h2 id="preferences-title">Workspace settings</h2></div><button data-close="preferences-dialog" class="icon-button" aria-label="Close settings">×</button></div><div class="preferences-body"><label class="check"><input id="sound" type="checkbox">Sound for input requests</label><button id="test-sound">Test sound</button><p id="ha-status" class="muted small"></p><div class="quick-tools"><h4>Extension settings</h4><p class="muted">Manage Home Assistant and encrypted backups.</p><button id="settings">Open settings &amp; backup ↗</button></div></div></dialog>
+  <script src="heartbeat.js"></script><script src="dashboard.js"></script>
+</body>
+</html>

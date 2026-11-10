@@ -1,0 +1,137 @@
+<!doctype html>
+<!-- Copyright (c) 2026 Phosphoros Research and contributors.
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
+SPDX-License-Identifier: MPL-2.0 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Home Assistant Settings · Threadlamp</title>
+    <link rel="stylesheet" href="options.css">
+    <link rel="stylesheet" href="brand.css">
+</head>
+  <body>
+    <main>
+      <header>
+        <div class="mark" aria-hidden="true">↻</div>
+        <div>
+          <p class="eyebrow">Threadlamp · Phosphoros Research</p>
+          <h1>Home Assistant settings</h1>
+          <p class="intro">This page stays open while you switch tabs or windows to collect your Home Assistant information.</p>
+        </div>
+        <span id="ha-badge" class="badge">Not configured</span>
+      </header>
+
+      <section class="card">
+        <form id="ha-controls">
+          <label class="check-row" for="ha-enabled">
+            <input id="ha-enabled" type="checkbox">
+            <span>
+              <strong>Enable phone notifications</strong>
+              <small>Send an actionable notification when Logic Mode requests user input.</small>
+            </span>
+          </label>
+
+          <div class="field">
+            <label for="ha-url">Home Assistant URL</label>
+            <input id="ha-url" type="url" placeholder="https://homeassistant.example.com" autocomplete="off">
+            <small>Enter only the origin, including the port when needed.</small>
+          </div>
+
+          <div class="field">
+            <label for="ha-notify-action">Mobile notification action</label>
+            <input id="ha-notify-action" type="text" placeholder="notify.mobile_app_your_phone" autocomplete="off">
+            <small>Find this under Home Assistant Developer tools → Actions.</small>
+          </div>
+
+          <div class="field">
+            <label for="ha-token">Long-lived access token</label>
+            <input id="ha-token" type="password" placeholder="Enter access token" autocomplete="new-password">
+            <small id="ha-token-state">No token saved. Enter the token here only; never paste it into ChatGPT.</small>
+          </div>
+
+          <div class="field">
+            <label for="ha-approval-message">Approve button message</label>
+            <textarea id="ha-approval-message" rows="3" maxlength="4000">Approved. Continue with the current task.</textarea>
+            <small>This exact text is sent to ChatGPT when you select Approve on the phone.</small>
+          </div>
+
+          <label class="check-row" for="ha-persistent">
+            <input id="ha-persistent" type="checkbox" checked>
+            <span>
+              <strong>Persistent/sticky notification</strong>
+              <small>Mainly supported by the Android Companion app.</small>
+            </span>
+          </label>
+
+          <div class="primary-actions">
+            <button id="ha-save" class="primary" type="submit">Save settings</button>
+            <button id="ha-test-connection" class="secondary" type="button">Test connection</button>
+            <button id="ha-test-notification" class="secondary" type="button">Send test notification</button>
+          </div>
+
+          <div class="status" aria-live="polite">
+            <strong>Connection status</strong>
+            <p id="ha-status">Home Assistant is not configured.</p>
+          </div>
+
+          <div class="danger-zone">
+            <div>
+              <strong>Remove configuration</strong>
+              <p>Deletes the saved URL, notification action, and access token from this Chrome profile.</p>
+            </div>
+            <button id="ha-forget" class="danger" type="button">Forget settings</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card backup-card" aria-labelledby="backup-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Removal-safe copy</p>
+            <h2 id="backup-heading">Encrypted settings backup</h2>
+          </div>
+          <span class="secure-badge">AES-256</span>
+        </div>
+        <p class="section-copy">
+          Download a file before removing the extension, then import it after reinstalling.
+          It includes the Home Assistant token and other saved settings only inside passphrase encryption.
+        </p>
+
+        <div class="backup-controls">
+          <div class="field">
+            <label for="backup-passphrase">Backup passphrase</label>
+            <input id="backup-passphrase" type="password" autocomplete="new-password" minlength="12" placeholder="At least 12 characters">
+            <small>The passphrase is never saved. If it is lost, the backup cannot be recovered.</small>
+          </div>
+
+          <div class="field">
+            <label for="backup-confirm">Confirm passphrase for export</label>
+            <input id="backup-confirm" type="password" autocomplete="new-password" minlength="12" placeholder="Repeat the passphrase">
+            <small>Confirmation is required only when downloading a new backup.</small>
+          </div>
+
+          <div class="field">
+            <label for="backup-file">Encrypted backup file</label>
+            <input id="backup-file" type="file" accept=".json,application/json">
+            <small>Import replaces the currently saved settings after validating the file.</small>
+          </div>
+
+          <div class="backup-actions">
+            <button id="backup-export" class="primary" type="button">Download encrypted backup</button>
+            <button id="backup-import" class="secondary" type="button">Unlock encrypted backup</button>
+          </div>
+
+          <div class="status" aria-live="polite">
+            <strong>Backup status</strong>
+            <p id="backup-status">No backup operation is running.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="settings-backup.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

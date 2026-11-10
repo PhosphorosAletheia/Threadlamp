@@ -1,0 +1,138 @@
+<!doctype html>
+<!-- Copyright (c) 2026 Phosphoros Research and contributors.
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
+SPDX-License-Identifier: MPL-2.0 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Threadlamp</title>
+    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="brand.css">
+</head>
+  <body>
+    <main>
+      <header>
+        <div class="mark" aria-hidden="true">↻</div>
+        <div>
+          <h1>Threadlamp</h1>
+          <p>By Phosphoros Research · Beta</p>
+        </div>
+      </header>
+
+      <button id="open-dashboard" class="logic-primary settings-link" type="button">Open agent dashboard</button>
+
+      <form id="controls">
+        <label for="message">Message to send</label>
+        <textarea id="message" rows="3" maxlength="4000" required>Continue</textarea>
+
+        <label for="limit">Number of messages</label>
+        <input id="limit" type="number" min="1" max="1000" step="1" value="5" required>
+
+        <div class="actions">
+          <button id="start" class="primary" type="submit">Start loop</button>
+          <button id="stop" class="danger" type="button" disabled>Stop</button>
+        </div>
+      </form>
+
+      <section class="logic-mode">
+        <div class="section-heading">
+          <h2>Logic mode</h2>
+          <span class="mode-badge">Flag driven</span>
+        </div>
+        <p>Start sends the protocol. Resume continues after a page refresh without sending it again.</p>
+        <div class="actions logic-actions">
+          <button id="logic-start" class="logic-primary" type="button">Start logic</button>
+          <button id="logic-resume" class="logic-secondary" type="button">Resume</button>
+          <button id="logic-stop" class="danger" type="button" disabled>Stop logic</button>
+        </div>
+        <div class="rollover-setting">
+          <label class="sound-row" for="project-rollover">
+            <input id="project-rollover" type="checkbox" checked>
+            <span>Continue in a new chat in the same project at the conversation limit</span>
+          </label>
+          <p>Uses ChatGPT’s visible project action and stops safely if the project cannot be verified.</p>
+        </div>
+        <div class="sound-setting">
+          <label class="sound-row" for="user-input-sound">
+            <input id="user-input-sound" type="checkbox" checked>
+            <span>Sound when user input is needed</span>
+          </label>
+          <button id="test-sound" class="sound-test" type="button">Test sound</button>
+        </div>
+      </section>
+
+      <section class="heartbeat-settings">
+        <div class="section-heading"><h2>Heartbeat for this chat</h2><span id="hb-badge" class="mode-badge">Disabled</span></div>
+        <p>Wake the agent on a schedule. IDLE ends each work cycle. Keep the saved chat tab open.</p>
+        <form id="hb-form">
+          <label for="hb-kind">Schedule</label>
+          <select id="hb-kind"><option value="interval">Every N minutes</option><option value="daily">Specific times and weekdays</option></select>
+          <div id="hb-interval-fields"><label for="hb-interval">Minutes between heartbeats</label><input id="hb-interval" type="number" min="1" max="10080" value="60"></div>
+          <div id="hb-daily-fields" hidden>
+            <label for="hb-times">Times (24-hour, separated by commas)</label><input id="hb-times" value="09:00, 15:00" placeholder="09:00, 15:00">
+            <fieldset class="hb-days"><legend>Weekdays</legend>
+              <label><input type="checkbox" value="1" checked>Mon</label><label><input type="checkbox" value="2" checked>Tue</label><label><input type="checkbox" value="3" checked>Wed</label><label><input type="checkbox" value="4" checked>Thu</label><label><input type="checkbox" value="5" checked>Fri</label><label><input type="checkbox" value="6">Sat</label><label><input type="checkbox" value="0">Sun</label>
+            </fieldset>
+          </div>
+          <label for="hb-timezone">Timezone</label><input id="hb-timezone" value="America/Chicago" required>
+          <label for="hb-prompt">Heartbeat message</label><textarea id="hb-prompt" rows="4" maxlength="4000" required></textarea>
+          <label for="hb-limit">Maximum follow-ups per cycle</label><input id="hb-limit" type="number" min="1" max="1000" value="5" required>
+          <button id="hb-save" class="logic-primary" type="submit">Save &amp; enable heartbeat</button>
+        </form>
+        <div class="actions logic-actions"><button id="hb-run" class="logic-secondary" type="button" disabled>Run now</button><button id="hb-pause" class="logic-secondary" type="button" disabled>Pause</button><button id="hb-disable" class="danger" type="button" disabled>Disable</button></div>
+        <p id="hb-status" aria-live="polite">No heartbeat configured.</p>
+      </section>
+
+      <section class="heartbeat-settings">
+        <details>
+          <summary>Local server connection for this project</summary>
+          <p>Use Recover connection if the agent already set up its server, even if this extension has no saved record. It reuses the existing server, fixed port, and completed work. Finish the current response first.</p>
+          <p id="sl-status" aria-live="polite">Open a saved project chat.</p>
+          <div class="actions logic-actions">
+            <button id="sl-setup" class="logic-primary" type="button">Set up connection</button>
+            <button id="sl-recover" class="logic-secondary" type="button">Recover connection</button>
+            <button id="sl-toggle" class="logic-secondary" type="button" disabled>Disable</button>
+            <button id="sl-assign" class="logic-secondary" type="button" disabled>Assign this chat</button>
+          </div>
+          <div id="sl-resolution" hidden>
+            <p>A send was uncertain. Inspect the chat before choosing whether to retry it.</p>
+            <label for="sl-event">Event awaiting your decision</label>
+            <select id="sl-event"></select>
+            <div class="actions">
+              <button id="sl-delivered" type="button">Already delivered</button>
+              <button id="sl-retry" type="button">Not sent — retry</button>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section class="ha-settings">
+        <div class="section-heading">
+          <h2>Home Assistant</h2>
+          <span id="ha-badge" class="mode-badge">Not configured</span>
+        </div>
+        <p id="ha-summary">Configure phone notifications in a tab that stays open.</p>
+        <button id="ha-open-settings" class="logic-secondary settings-link" type="button">Open settings in tab</button>
+      </section>
+
+      <section class="status" aria-live="polite">
+        <div class="status-line">
+          <span id="dot" class="dot"></span>
+          <strong id="status-title">Stopped</strong>
+          <span id="count">0 / 0</span>
+        </div>
+        <p id="status-detail">Open a ChatGPT conversation to begin.</p>
+      </section>
+
+      <p class="hint">Keep this tab open. You can close this popup while the loop runs.</p>
+    </main>
+    <script src="popup.js"></script>
+    <script src="heartbeat.js"></script>
+    <script src="popup-heartbeat.js"></script>
+    <script src="server-link.js"></script>
+    <script src="popup-server-link.js"></script>
+  </body>
+</html>

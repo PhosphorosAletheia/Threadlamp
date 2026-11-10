@@ -1,0 +1,14 @@
+/dist/
+/node_modules/
+/coverage/
+/test-results/
+/.env
+/.env.*
+/.aws/
+/.codex/
+/.agents/
+/rollback-artifacts/
+*.encrypted.json
+*.bundle
+*.log
+__pycache__/

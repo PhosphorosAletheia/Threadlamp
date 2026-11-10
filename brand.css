@@ -1,0 +1,14 @@
+/* Copyright (c) 2026 Phosphoros Research and contributors.
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ * SPDX-License-Identifier: MPL-2.0 */
+
+:root { color-scheme: dark; --bg: #090506; --panel: #160c0a; --sidebar: #160c0a; --text: #f9eee0; --muted: #c5b5a8; --line: #493326; --accent: #ffcd58; --accent-soft: #392415; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #090506; color: #f9eee0; }
+body { background: #090506; color: #f9eee0; }
+.mark, .brand-mark { background: #392415; color: #ffcd58; }
+button.primary, button.logic-primary { background: #ff8a23; border-color: #ff8a23; color: #1b0b06; }
+button.primary:hover:not(:disabled), button.logic-primary:hover:not(:disabled) { background: #ffcd58; border-color: #ffcd58; color: #1b0b06; }
+:focus-visible { outline-color: #ffcd58; }
+.product-lockup { display: flex; flex-direction: column; line-height: 1.3; }
+.publisher { color: #c5b5a8; font-size: 9px; letter-spacing: .025em; }
