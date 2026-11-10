@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.7 beta 1
+
+- Fix queued follow-ups stopping before Send when the ChatGPT editor adds an
+  empty decorative icon to the draft. Full message text must still match, and
+  manual edits, attachments, and unsupported content continue to block sending.
+
 ## 1.9.6 beta 1
 
 First public beta of Threadlamp by Phosphoros Research.

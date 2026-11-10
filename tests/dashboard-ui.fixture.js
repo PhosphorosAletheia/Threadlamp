@@ -29,7 +29,7 @@ function mock() {
   const configuration = { kind: "interval", intervalMinutes: 60, times: [], days: [], timeZone: "America/Chicago", prompt: "Check the next scheduled tasks.", limit: 5, phase: "sleeping", detail: "Waiting for next cycle." };
   globalThis.chrome = {
     runtime: { openOptionsPage: async () => {}, sendMessage: async request => {
-      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.9.6" });
+      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.9.7" });
       if (request.type === "DB_INSPECT") return { ok: true, schedule: configuration, connection: null, defaultPrompt: "Do the scheduled work." };
       if (request.type === "ALERT_GET_SETTINGS") return { soundEnabled: true };
       if (request.type === "HA_GET_SETTINGS") return { enabled: true, connection: { phase: "connected" }, approvalMessage: "Approved. Continue with the current task." };

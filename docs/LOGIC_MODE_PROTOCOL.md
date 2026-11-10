@@ -1,7 +1,7 @@
 # Logic Mode protocol
 
 This reference describes the assistant response markers used by Threadlamp
-1.9.6 beta 1. Selecting **Start logic** sends the operating instructions to the
+1.9.7 beta 1. Selecting **Start logic** sends the operating instructions to the
 conversation automatically. No separate setup prompt or framework file is required.
 
 ## Activation and response format

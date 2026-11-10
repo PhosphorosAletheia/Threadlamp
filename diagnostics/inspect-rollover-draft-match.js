@@ -213,6 +213,28 @@
     return (composer.innerText || composer.textContent || "").trim();
   }
 
+  function isEmptyComposerDecoration(node) {
+    if (node.nodeType !== 1 || node.tagName !== "SPAN"
+      || node.getAttribute("contenteditable") !== "false"
+      || node.getAttribute("aria-hidden") !== "true" || node.textContent !== "") return false;
+    // Rich editors can insert an empty icon beside plain text. Accept only a
+    // bounded span/SVG/path decoration, never text, attachments, or labeled UI.
+    const pending = [node];
+    let count = 0, svgCount = 0, pathCount = 0;
+    while (pending.length) {
+      const current = pending.pop();
+      if (++count > 32 || current.nodeType !== 1
+        || !["SPAN", "SVG", "PATH"].includes(current.tagName.toUpperCase())
+        || current.textContent !== ""
+        || ["aria-label", "aria-labelledby", "title", "alt", "src", "href", "role"]
+          .some(name => current.getAttribute(name) !== null)) return false;
+      if (current.tagName.toUpperCase() === "SVG") svgCount += 1;
+      if (current.tagName.toUpperCase() === "PATH") pathCount += 1;
+      pending.push(...current.childNodes);
+    }
+    return svgCount === 1 && pathCount > 0;
+  }
+
   function composerDraftMatches(composer, expected) {
     const normalize = text => String(text).replace(/\r\n?/g, "\n").trim();
     if (!composer) return false;
@@ -224,6 +246,7 @@
     if (!blocks.length || !blocks.every(node => node.nodeType === 1 && /^(P|DIV)$/.test(node.tagName))) return false;
     const inlineText = node => {
       if (node.nodeType === 3) return node.nodeValue;
+      if (isEmptyComposerDecoration(node)) return "";
       if (node.nodeType !== 1 || node.getAttribute("contenteditable") === "false") return null;
       if (node.tagName === "BR") return "\n";
       if (!/^(P|DIV|SPAN)$/.test(node.tagName)) return null;

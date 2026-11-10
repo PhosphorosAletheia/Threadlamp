@@ -16,7 +16,90 @@ function normal(outcomes = ["idle"], flag = "CONTINUE") {
 }
 const combined = (base, prompt) => `${base}\n\nAdditional instructions from the user for this round:\n${prompt}`;
 
+// Minimal rich-editor fixture: paragraphs add layout newlines, while an empty
+// aria-hidden SVG decoration sits alongside ordinary text in nested spans.
+const textNode = text => ({ nodeType: 3, nodeValue: text });
+function editorElement(tagName, childNodes = [], attributes = {}) {
+  return { nodeType: 1, tagName, childNodes, attributes,
+    getAttribute(name) { return this.attributes[name] ?? null; },
+    get textContent() { return this.childNodes.map(n => n.nodeType === 3 ? n.nodeValue : n.textContent).join(""); } };
+}
+function decoratedDraft(text) {
+  const path = editorElement("path");
+  const svg = editorElement("svg", [path]);
+  const icon = editorElement("SPAN", [editorElement("SPAN", [svg], { contenteditable: "false" }), editorElement("SPAN")],
+    { contenteditable: "false", "aria-hidden": "true" });
+  const lines = text.split("\n");
+  const paragraphs = lines.map(line => editorElement("P", line ? [textNode(line)] : [editorElement("BR")]));
+  paragraphs.at(-1).childNodes = [editorElement("SPAN", [editorElement("SPAN", [icon, textNode(lines.at(-1))])])];
+  return { icon, svg, path, paragraphs, rendered: lines.join("\n\n") + "\n", text };
+}
+
+async function decoratedQueueTests() {
+  const extra = "Inspect the example.\nKeep the result concise.";
+  const expected = combined("Continue", extra);
+  for (const inProject of [false, true]) {
+    const f = normal();
+    if (inProject) f.window.location = new URL("https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef-example/c/example");
+    f.api.queueAdditionalPrompt(extra);
+    f.setWriter((target, text) => {
+      const rich = decoratedDraft(text);
+      target.childNodes = rich.paragraphs;
+      target.textContent = rich.paragraphs.map(p => p.textContent).join("");
+      target.innerText = rich.rendered;
+      f.setSelector("button[data-testid='send-button']", [f.send]);
+      return true;
+    });
+    assert.equal(await f.api.submitMessage(1, "Continue", "Sending", null, 8000, null, true), true);
+    assert.equal(f.sends.length, 1, "a decorative icon must not prevent the queued send");
+    assert.equal(f.api.getQueuedPromptForTest(), null, "consume the queue once Send is attempted");
+  }
+  // The real writer must preserve a valid editor tree instead of replacing it
+  // through textContent when the page decorates the inserted text.
+  const writer = normal();
+  let fallbackWrites = 0;
+  Object.defineProperty(writer.composer, "textContent", {
+    get() { return this.childNodes?.map(p => p.textContent).join("") || ""; },
+    set() { fallbackWrites += 1; }
+  });
+  writer.composer.focus = writer.composer.dispatchEvent = () => {};
+  writer.document.createRange = () => ({ selectNodeContents() {}, collapse() {} });
+  writer.document.execCommand = (command, ui, text) => {
+    assert.equal(command, "insertText");
+    const rich = decoratedDraft(text);
+    writer.composer.childNodes = rich.paragraphs;
+    writer.composer.innerText = rich.rendered;
+    return true;
+  };
+  assert.equal(writer.api.writeComposerForTest(writer.composer, expected), true);
+  assert.equal(fallbackWrites, 0, "preserve valid rich editor content");
+
+  const f = normal();
+  for (const change of ["text", "space", "newline", "invisible", "nonhidden", "label", "image", "editable", "unknown", "deep", "no_svg"]) {
+    const rich = decoratedDraft(expected);
+    if (change === "text") rich.icon.childNodes.push(textNode("extra"));
+    if (change === "space") rich.icon.childNodes.push(textNode(" "));
+    if (change === "newline") rich.paragraphs.push(editorElement("P", [editorElement("BR")]), editorElement("P", [textNode("Extra line")]));
+    if (change === "invisible") rich.icon.childNodes.push(textNode("\u200b"));
+    if (change === "nonhidden") delete rich.icon.attributes["aria-hidden"];
+    if (change === "label") rich.icon.attributes["aria-label"] = "Attachment";
+    if (change === "image") rich.svg.childNodes.push(editorElement("IMG", [], { src: "example.png" }));
+    if (change === "editable") rich.icon.attributes.contenteditable = "true";
+    if (change === "unknown") rich.svg.childNodes.push(editorElement("foreignObject"));
+    if (change === "deep") for (let i = 0; i < 40; i++) rich.svg.childNodes.push(editorElement("path"));
+    if (change === "no_svg") rich.icon.childNodes = [editorElement("SPAN")];
+    const composer = { innerText: rich.rendered, childNodes: rich.paragraphs };
+    assert.equal(f.api.composerDraftMatches(composer, expected), false, change);
+  }
+  for (const edit of ["Inspect the Example.", "Inspect  the example.", "Inspect the example.\t", "Inspect the example.\u00a0", "Inspect the example.\u200b"]) {
+    const rich = decoratedDraft(expected.replace("Inspect the example.", edit));
+    assert.equal(f.api.composerDraftMatches({ innerText: rich.rendered, childNodes: rich.paragraphs }, expected), false,
+      "actual text changes remain significant");
+  }
+}
+
 (async () => {
+  await decoratedQueueTests();
   let f = normal(["continue", "idle"]);
   f.api.updateOverlay();
   const shadow = f.api.getOverlayForTest().shadowRoot;
