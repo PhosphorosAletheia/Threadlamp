@@ -8,10 +8,15 @@
 from pathlib import Path, PurePosixPath
 import hashlib
 import json
+import os
 import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL_ONLY_DIRS = frozenset({
+    '.git', '.aws', '.codex', '.agents', 'rollback-artifacts', 'dist',
+    'node_modules', 'coverage', 'test-results',
+})
 
 
 def inventory():
@@ -22,7 +27,7 @@ def inventory():
         for name in names:
             p = PurePosixPath(name)
             assert not p.is_absolute() and '..' not in p.parts and '\\' not in name, 'Unsafe archive path'
-            assert not any(part in {'.git', '.aws', '.codex', '.agents', 'rollback-artifacts', 'dist', 'node_modules'} for part in p.parts), 'Private directory in inventory'
+            assert not any(part in LOCAL_ONLY_DIRS for part in p.parts), 'Private directory in inventory'
             assert not p.name.startswith('.env') and not name.endswith(('.bundle', '.encrypted.json', '.log')), 'Private file in inventory'
             path = ROOT / name
             assert path.is_file(), f'Missing release file: {name}'
@@ -36,12 +41,19 @@ def check():
     data = inventory()
     expected = set(data['source'])
     actual = set()
-    for path in ROOT.rglob('*'):
-        rel = path.relative_to(ROOT)
-        if rel.parts[0] in {'.git', 'dist'} or '__pycache__' in rel.parts:
-            continue
-        if path.is_file() or path.is_symlink():
-            actual.add(rel.as_posix())
+    # Local rollback archives and tool state are never traversed or packaged.
+    # Unknown source files still fail the inventory check; exclusions cannot
+    # override the explicit private-directory rejection in inventory().
+    for directory, dirs, files in os.walk(ROOT, followlinks=False):
+        parent = Path(directory)
+        for name in list(dirs):
+            path = parent / name
+            if name == '__pycache__' or (parent == ROOT and name in LOCAL_ONLY_DIRS):
+                dirs.remove(name)
+            elif path.is_symlink():
+                actual.add(path.relative_to(ROOT).as_posix())
+                dirs.remove(name)
+        actual.update((parent / name).relative_to(ROOT).as_posix() for name in files)
     assert actual == expected, f'Inventory mismatch: extra={sorted(actual-expected)} missing={sorted(expected-actual)}'
     manifest = json.loads((ROOT / 'manifest.json').read_text())
     assert manifest['manifest_version'] == 3

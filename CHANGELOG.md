@@ -11,5 +11,7 @@
   identifiers compatible with the development baseline.
 - Extends the compact dashboard layout to intermediate viewport heights so its
   primary queue action remains visible without scrolling.
+- Uses the main checkout for both development and beta packaging; release checks
+  exclude local rollback archives without traversing or including their contents.
 
 Live ChatGPT testing is a separate release check; see `VALIDATION.md`.

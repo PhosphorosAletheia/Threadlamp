@@ -19,6 +19,11 @@ Snapshot: Threadlamp **1.9.6 beta 1**, prepared November 9, 2026.
   known private project references, local home paths and original chat identifiers.
 - Packaging verifies each ZIP entry against its source and generates SHA-256
   checksums. An explicit inventory excludes Git metadata and local artifacts.
+- After consolidating development into the main checkout, all 21 test files
+  passed again. Release-guard checks confirmed local archives are skipped,
+  private paths explicitly added to the inventory are rejected, and unknown
+  source files still fail review. The installable ZIP remains byte-identical
+  to the initially reviewed beta; source-only tooling and guidance were updated.
 
 The dashboard fixture uses invented data and mocks Chrome APIs. It exercises
 selection, queueing, replies, approvals, schedules, stale/offline guards, dialogs,
