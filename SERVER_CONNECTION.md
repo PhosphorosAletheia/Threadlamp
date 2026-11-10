@@ -1,130 +1,64 @@
 # Local server connection — protocol 1
 
-Threadlamp supports opt-in project server connections. This document specifies
-the existing protocol; it does not include a companion server implementation.
+Threadlamp can deliver project server events to an assigned ChatGPT conversation.
+This optional integration requires a compatible server on the computer running
+Chrome. A companion server is not included.
 
-## Set up
+## Setup
 
-1. Open the saved ChatGPT conversation that should receive a project's events.
-   Finish its current response and clear any draft. Setup will not interrupt
-   active work, a manual pause, or a request for human input.
-2. Open the extension popup, expand **Local server connection for this project**,
-   and select **Set up connection**. Chrome may request permission for loopback
-   hosts.
-3. The extension sends a generated prompt. The agent adds the protocol below to
-   its own server and replies with a fresh `SERVER_READY` block. There is no
-   manual address-copy step.
-4. The extension verifies the server, performs a transport test, and sends a
-   confirmation prompt. The agent must finish confirmation with `[[LOGIC:IDLE]]`.
-5. If the chat was already sleeping, its existing heartbeat resumes. Otherwise
-   select Start logic / Start next cycle to enable event processing.
+1. Open the saved ChatGPT conversation that should receive the project's events.
+   Finish its current response and clear any draft.
+2. In the extension popup, expand **Local server connection for this project**
+   and select **Set up connection**. Allow Chrome's loopback host permission.
+3. Threadlamp sends integration instructions to the agent, which configures its
+   server and returns a `SERVER_READY` block.
+4. Threadlamp verifies the endpoint, pairing, and transport, then sends a
+   confirmation prompt. Confirmation ends with `[[LOGIC:IDLE]]`.
+5. If the chat was already sleeping, its heartbeat resumes. Otherwise select
+   **Start logic** or **Start next cycle** to enable event processing.
 
-Setup/recovery prompts distinguish connection metadata from secrets and request
-the complete single-line `SERVER_READY` marker inside a fenced plain-text code
-block. Setup/project IDs and the loopback endpoint belong in that reply; pairing
-tokens and permanent credentials do not. Bare opening tags cannot advance setup.
-Fenced replies retain the same strict attempt, project, endpoint, and transport
-checks. This formatting change is a workaround to test, not proof of why a
-previous reply was incomplete.
+Setup waits for a finished reply; pauses between tool steps do not end the wait.
+It allows up to five follow-ups. The 15-minute setup lease renews while
+the same chat page and attempt remain active. Abandoned attempts expire.
 
-Server instructions also require HTTP/1.1 upgrade responses and browser-compatible
-compression negotiation. An unsupported `permessage-deflate` offer is declined by
-omitting the extension response header, without rejecting an otherwise valid
-request. Origin, endpoint, and authentication checks remain required.
+A draft, manual pause, active task, or request for human input can prevent setup.
+Resolve the condition before retrying. **Stop** or **Disable** cancels setup
+without clearing manual text. The popup displays setup errors.
 
-Setup waits for a fresh, stable reply with a `SERVER_READY` block or final Logic
-directive; pauses between thinking/tool steps do not end the wait. Confirmation
-also waits for a final Logic directive and requires `[[LOGIC:IDLE]]`. There is no
-fixed 15-minute limit on the agent's work. A 15-minute lease renews while the same
-chat page and setup attempt remain active; an abandoned attempt expires instead.
-There are still at most five setup follow-ups, and server transport verification
-remains bounded. Setup replies do not dispatch form events or ordinary Logic
-Mode follow-ups. Human-input replies stop setup for inspection, even when they
-also contain a server-ready block. Retry setup explicitly after resolving them.
-Stop or Disable cancels setup without clearing manual text. The popup retains
-the specific setup failure reason.
+## Recover a connection
 
-### Recover an interrupted setup
+After the current reply finishes, select **Recover connection** in the assigned
+chat. Recovery reuses the existing service, port, data, and completed work. If the
+agent cannot identify the original service, it requests your input.
 
-Let the current agent response finish, then use **Recover connection** in the
-assigned chat. This is a separate button available even when the extension has
-no saved setup record. In that case, the agent locates its existing integration
-in the current project's chat history, framework, and server configuration; the
-extension creates a new binding and pairing authorization for that service.
-It cannot reconstruct lost inbox or processed-event history, so the server and
-agent must retain their submission IDs and deduplicate completed work.
+Recovery retains saved credentials and pending/processed event IDs. Incomplete
+pairing uses a fresh one-time token. Each attempt has a new setup ID; an existing
+saved endpoint must remain the same. Recovery is also available when extension
+settings have been lost, but it cannot restore lost inbox or processed-event
+history. The server must keep its own submission records.
 
-The old setup message need not be the latest message or still present in the DOM.
-Recovery uses the saved project binding and server configuration, then sends a
-fresh tagged exchange. A page/browser restart can change the tab ID and page
-instance; explicit recovery verifies the restored assigned chat and updates its
-owner. A stale saved setup phase does not impose a 15-minute lockout: the worker
-checks whether the original attempt is actually running. A live attempt is
-rejected without sending another prompt. Old assistant flags in an inactive chat
-do not block explicit recovery; current Pause, drafts, active cycles, and active
-human-input holds retain their protections.
-
-An existing attempt automatically uses recovery, even if an older
-popup still sends the original setup action. The shorter recovery prompt asks
-the agent to inspect and reuse its existing service, port, saved data, outbox,
-and completed work, repairing only missing integration pieces. It must request
-human input if the original service is missing or ambiguous, rather than create
-a replacement.
-
-Recovery retains the saved endpoint, credential, and pending/processed event
-IDs. When a credential exists, the extension authenticates with it. When pairing
-was incomplete, it supplies a fresh pairing token for the same integration.
-Each recovery has a fresh setup ID to distinguish its reply from older replies;
-that ID does not mean a new server. A reply with a different saved endpoint is
-rejected. When no endpoint was saved, the agent must recover it from its existing
-configuration and earlier work; the extension cannot independently prove an
-unsaved address was the original one.
-
-The extension never automatically replays a failed setup prompt. A busy chat's
-explicit refusal preserves the previous saved state, and uncertain business
-event deliveries must be resolved before recovery.
-
-Each outgoing setup/recovery prompt, follow-up, and confirmation has a fresh
-`[[SERVER_SETUP_REQUEST:<random UUID>]]` tag. Before Send, the complete composer
-draft must match the intended message. After Send, the extension requires a fresh
-user turn containing exactly that request tag, then a fresh assistant reply
-after it. It does not compare the entire rendered prompt, which can contain UI
-labels or be split into content blocks. A missing, stale, or duplicate request
-tag cannot authorize the next step. This identifies a sent turn; it never grants
-permission to clear an arbitrary draft. The agent must not echo the request tag;
-its reply uses `SERVER_READY` or the requested Logic Mode final flag.
-
-The server must run at `localhost` or `127.0.0.1` as reachable from this Chrome
-computer. The agent must reuse its existing port, or choose and persist one
-available port from 1024 through 65535. It must not silently change ports or stop
-another process to acquire its preferred port.
+Resolve uncertain event deliveries before recovery. A live setup attempt prevents
+a competing attempt, and failed setup messages are not replayed automatically.
 
 ## Assignment and persistence
 
-Bindings use the stable `g-p-<32 hex digits>` project identifier, with the name
-used only as a label. They also store the exact receiving conversation URL.
-Different projects can use different ports. A second conversation in the same
-project does not automatically become its receiver.
+A connection uses the stable `g-p-<32 hex digits>` project identifier and the exact
+receiving conversation URL. Project names are labels. Different projects can use
+different ports; other chats in the same project do not automatically receive events.
 
-**Assign this chat** deliberately moves the binding to the currently selected
-saved chat. Verified extension rollovers transfer the existing binding and
-pending inbox only after the continuation prompt is observed in the new chat;
-the endpoint stays unchanged. A one-time handoff token ties confirmation to the
-claimed destination tab. Navigation alone cannot transfer the binding. Temporary new-chat URLs are not
-accepted as final destinations. An unverified rollover blocks delivery.
+**Assign this chat** moves the binding to the selected saved conversation.
+Conversation rollover transfers the binding and pending inbox after Threadlamp
+confirms its continuation prompt in the new chat. Unverified rollover blocks
+delivery; the server endpoint stays unchanged.
 
-The background worker stores bindings and events in `logicServerLinks`, separate
-from heartbeat settings. It reconnects after reload/restart and uses periodic
-alarms to recover disconnected sockets. Live connections exchange a keepalive
-every 20 seconds; this does not send chat messages. Offline agents cannot run:
-events wait in the durable server outbox or extension inbox.
+Bindings and events are stored locally in `logicServerLinks`. Completed connections
+reconnect after browser or worker restarts using their saved credentials. A
+20-second keepalive checks the connection without sending chat messages. Events
+wait in the server outbox or extension inbox while the agent is unavailable.
 
-An ordinary Chrome background-worker restart verifies the existing chat page,
-setup ID, and page instance, then resumes waiting without resending instructions.
-A chat or extension reload that loses the live setup state cannot resume that
-conversation safely; inspect it and use Recover connection. Completed bindings
-reconnect using the saved credential. A chat reload still follows the existing
-Logic Mode/heartbeat Resume rules.
+If a chat or extension reload interrupts setup, inspect the conversation and use
+**Recover connection**. An ordinary background-worker restart can resume setup
+while the original chat page and attempt remain active.
 
 ## Server contract
 
@@ -183,19 +117,19 @@ assistant's fresh setup response:
 [[SERVER_READY:{"protocol":1,"setupId":"<provided ID>","projectId":"<provided project>","endpoint":"ws://localhost:<port>/.well-known/continue-loop"}]]
 ```
 
-The agent must save the fixed address and event-processing procedure in its
-framework/startup documentation. The permanent credential belongs only in
-backend configuration and extension storage, never in chat or HTML. Re-pairing
-should replace the prior server credential. The extension's public status omits
-both credentials and pairing tokens.
+Store the fixed address and event-processing procedure in the agent's persistent
+project configuration. The permanent credential belongs in backend configuration
+and extension storage, never in chat or HTML. Re-pairing should replace the prior
+server credential. Threadlamp's public status omits credentials and pairing tokens.
 
-The agent must perform routine server configuration and token storage itself
-using its authorized tools. The one-time token is intentionally passed in the
-setup/recovery chat; saving it elsewhere does not remove that chat copy. Do not
-ask the user to run a command merely to keep it out of chat. Consume/remove it
-after pairing. The permanent backend credential must never be printed in chat.
-If the agent cannot access the server/configuration, it must identify the
-missing access and request human input instead of claiming completion.
+The one-time pairing token is supplied in the setup conversation and remains in
+chat history. The server consumes it after pairing. Setup requires an agent with
+access to the server configuration; missing access pauses setup for user input.
+
+WebSocket upgrades require HTTP/1.1 responses and browser-compatible compression
+negotiation. If the server does not support `permessage-deflate`, omit that
+response header while accepting otherwise valid upgrades. Preserve Origin and
+authentication checks.
 
 ## Sending and recovery
 
@@ -225,16 +159,11 @@ The server must also implement durable idempotency by submission ID; this is not
 an exactly-once execution guarantee. Form submission success must not depend on
 the notification connection being available.
 
-## Compatibility and test boundary
+## Updates and testing
 
-The public beta preserves the existing storage and protocol identifiers. Disable
-server connections before a planned downgrade; take care with pending/uncertain
-events before enabling them again. Uninstalling or clearing extension storage loses
-bindings. Existing settings export does not include this inbox or its credentials.
+Disable server connections before a downgrade and resolve pending or uncertain
+events before re-enabling them. Clearing extension storage or uninstalling loses
+bindings. Settings exports do not include server credentials or the event inbox.
 
-Automated tests exercise protocol validation, worker routing/storage, pairing,
-transport tests, duplicate suppression, uncertain sends, rollover, popup controls,
-and content-script setup/sending using simulated Chrome, DOM and WebSocket APIs.
-They are not a live ChatGPT or real agent-server test. The first installed test
-should use one project and one harmless form submission, checking both chat
-delivery and server-side processed-submission tracking.
+For the first integration test, use one project and a disposable form submission.
+Check both chat delivery and the server's processed-submission record.

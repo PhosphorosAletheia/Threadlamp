@@ -2,17 +2,16 @@
 
 ## 1.9.6 beta 1
 
-- First public beta preparation as Threadlamp by Phosphoros Research.
-- Adds publisher branding, bundled application icons, MPL-2.0 licensing, privacy
-  and support documentation, and explicit release packaging.
-- Generalizes internal test-project names and omits private diagnostics and
-  development/rollback records from the public source snapshot.
-- Keeps existing automation, storage keys, backup format and server protocol
-  identifiers compatible with the development baseline.
-- Extends the compact dashboard layout to intermediate viewport heights so its
-  primary queue action remains visible without scrolling.
-- Uses the main checkout for both development and beta packaging; release checks
-  exclude local rollback archives without traversing or including their contents.
+First public beta of Threadlamp by Phosphoros Research.
 
-The maintainer reported a successful smoke test after the local beta update;
-see `VALIDATION.md` for verification scope and remaining coverage limits.
+- Follow-up loops with message limits and Pause/Stop controls.
+- Logic Mode with continue, wait, input-request, and idle states.
+- A prompt queue for adding instructions to the next automatic turn.
+- A dashboard for conversation status, replies, and schedules.
+- Per-conversation heartbeats and project conversation rollover.
+- Optional Home Assistant notifications and local server event delivery.
+- Encrypted export and import of supported settings.
+- Compact dashboard layout with an accessible queue action at intermediate heights.
+
+See the [user guide](USER_GUIDE.md) for controls, scheduling behavior, and backup
+coverage, and the [README](README.md#beta-limitations) for beta limitations.
