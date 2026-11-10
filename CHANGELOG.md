@@ -14,4 +14,5 @@
 - Uses the main checkout for both development and beta packaging; release checks
   exclude local rollback archives without traversing or including their contents.
 
-Live ChatGPT testing is a separate release check; see `VALIDATION.md`.
+The maintainer reported a successful smoke test after the local beta update;
+see `VALIDATION.md` for verification scope and remaining coverage limits.

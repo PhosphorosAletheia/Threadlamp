@@ -29,12 +29,16 @@ The dashboard fixture uses invented data and mocks Chrome APIs. It exercises
 selection, queueing, replies, approvals, schedules, stale/offline guards, dialogs,
 keyboard/focus behavior and large-list layout without contacting real services.
 
-## Not yet established
+## Maintainer smoke test
 
-No live authenticated ChatGPT run, phone notification, real project-server event
-or live quota-limit encounter was performed for this beta. Those checks remain
-in the [release checklist](RELEASE_CHECKLIST.md). Existing browser sessions and
-the development extension were not reloaded or modified.
+On November 9, 2026, the maintainer reported that the smoke test passed after
+the local checkout was updated to Threadlamp 1.9.6 beta 1. This is a
+maintainer-reported result; individual scenarios and a detailed run log were
+not supplied.
+
+Phone notifications, real project-server events and quota-limit handling were
+not separately reported as tested. The report does not establish those optional
+paths. See the [release checklist](RELEASE_CHECKLIST.md) for broader coverage.
 
 Secret scanning is evidence about detectable patterns, not a guarantee that all
 sensitive material or every security defect is absent. Source inspection cannot
