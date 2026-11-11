@@ -82,9 +82,11 @@ function actions() {
   for (const label of ["Start new chat", "New chat", "Start a new chat", "Open new conversation"]) {
     const h = fixture(), button = visibleElement(label);
     h.alert.querySelectorAll = () => [button];
+    assert.equal(h.api.findProjectRolloverAction().kind, "project_home", "prefer navigation that exposes a stable project ID");
+    h.setSelector("a[href]", []);
     assert.equal(h.api.findProjectRolloverAction().kind, "notice_button", label);
     button.disabled = true;
-    assert.equal(h.api.findProjectRolloverAction().kind, "project_home", "disabled button falls back to same-project link");
+    assert.equal(h.api.findProjectRolloverAction(), null);
   }
   for (const [name, change] of Object.entries({
     wrongProject: h => { h.attrs.href = homeUrl.replace(projectId, "g-p-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); },
@@ -105,6 +107,7 @@ function actions() {
 }
 function unknownErrorFixture() {
   const h = fixture();
+  h.setSelector("a[href]", []);
   const button = visibleElement("Start new chat");
   h.alert.textContent = "Unknown errorStart new chat";
   h.alert.querySelectorAll = () => [button];

@@ -37,6 +37,7 @@ function exposeContentFunctions(source) {
       getOverlayForTest() { return overlayHost; },
       getQueuedPromptForTest() { return queuedPrompt; },
       submitMessage,
+      sendQuickPrompt,
       startClaimedLogicRollover,
       findDeliveryTimeoutNotice,
       deliveryTimeoutResponse,
@@ -298,14 +299,14 @@ function storageArea() {
   return {
     values,
     async get(keys) {
-      if (typeof keys === "string") return { [keys]: values[keys] };
+      if (typeof keys === "string") return { [keys]: structuredClone(values[keys]) };
       if (Array.isArray(keys)) {
-        return Object.fromEntries(keys.map((key) => [key, values[key]]));
+        return Object.fromEntries(keys.map((key) => [key, structuredClone(values[key])]));
       }
-      return { ...(keys || {}), ...values };
+      return { ...(keys || {}), ...structuredClone(values) };
     },
     async set(update) {
-      Object.assign(values, update);
+      Object.assign(values, structuredClone(update));
     },
     async remove(key) {
       delete values[key];
@@ -376,8 +377,11 @@ async function backgroundHarness(localArea = null) {
       handleNotificationAction,
       setConfigForTest(value) { config = { ...config, ...value }; },
       prepareLogicRollover,
+      allowNotificationForTest() { waitForSocket = async () => true; },
       claimLogicRollover,
-      cancelLogicRollover
+      cancelLogicRollover,
+      completeLogicRollover,
+      recordChildForTest(id, opener) { rolloverChildTabs.set(id, { opener, createdAt: Date.now() }); }
     });`;
   vm.runInContext(source, context, { filename: "background.js" });
   await new Promise((resolve) => setImmediate(resolve));
@@ -551,24 +555,24 @@ async function testErrorNotificationRouting() {
 async function testContentRolloverGuards() {
   const harness = contentHarness();
   const { api, document, window } = harness;
-  const project = "g-p-6a989f8f5e308191b42ae3966f3c3a74-money-tree";
+  const project = "g-p-0123456789abcdef0123456789abcdef-example-project";
   const sourceUrl = `https://chatgpt.com/g/${project}/c/source-chat`;
 
   assert.equal(api.projectSegmentFromLocation(sourceUrl), project);
   assert.equal(api.projectSegmentFromLocation("https://chatgpt.com/c/not-a-project"), "");
   assert.equal(api.projectSegmentFromLocation("https://example.com/g/g-p-fake"), "");
-  assert.equal(api.projectSlugFromSegment(project), "money-tree");
-  assert.equal(api.selectedProjectMatchesSegment("Money Tree", project), true);
+  assert.equal(api.projectSlugFromSegment(project), "example-project");
+  assert.equal(api.selectedProjectMatchesSegment("Example Project", project), true);
   assert.equal(api.selectedProjectMatchesSegment("Another Project", project), false);
 
-  const projectComposer = visibleElement("", { "aria-label": "New chat in Money Tree" });
-  const projectButton = visibleElement("", { "aria-label": "Change project: Money Tree" });
+  const projectComposer = visibleElement("", { "aria-label": "New chat in Example Project" });
+  const projectButton = visibleElement("", { "aria-label": "Change project: Example Project" });
   window.location.href = "https://chatgpt.com/";
   window.location.pathname = "/";
   harness.setSelector("#prompt-textarea", [projectComposer]);
   harness.setSelector("button[aria-label^='Change project:']", [projectButton]);
-  assert.equal(api.selectedProjectNameFromPage(), "Money Tree");
-  assert.equal(api.destinationMatchesProject(project), true);
+  assert.equal(api.selectedProjectNameFromPage(), "Example Project");
+  assert.equal(api.destinationMatchesProject(project), false, "project names cannot authorize routing");
 
   const wrongProjectButton = visibleElement("", {
     "aria-label": "Change project: Another Project"
@@ -677,8 +681,8 @@ async function testRolloverFailureStopsAndPreservesReason() {
     alert.querySelectorAll = () => [button];
     harness.setAlerts([alert]);
     button.click = () => {
-      window.location.href = "https://chatgpt.com/";
-      window.location.pathname = "/";
+      window.location.href = `https://chatgpt.com/g/${project}`;
+      window.location.pathname = `/g/${project}`;
       document.title = "ChatGPT";
       harness.setAlerts([]);
       composer.innerText = composer.textContent = "different manual draft";
@@ -742,7 +746,7 @@ async function testGpt6TrailingResourceCards() {
 
 async function testBackgroundRolloverBinding() {
   const { api, fetchCalls } = await backgroundHarness();
-  const project = "g-p-6a989f8f5e308191b42ae3966f3c3a74-money-tree";
+  const project = "g-p-0123456789abcdef0123456789abcdef-example-project";
   const sourceUrl = `https://chatgpt.com/g/${project}/c/source-chat`;
   const destinationUrl = `https://chatgpt.com/g/${project}`;
   const sender = {
@@ -763,6 +767,16 @@ async function testBackgroundRolloverBinding() {
   }, sender);
   assert.equal(prepared.ok, true);
 
+  for (const tab of [
+    { id: 99, url: destinationUrl },
+    { id: 99, openerTabId: 17, url: destinationUrl },
+    { id: 17, url: destinationUrl.replace("chatgpt.com", "chat.openai.com") },
+    { id: 17, url: destinationUrl.replace("0123456789abcdef0123456789abcdef", "abcdef0123456789abcdef0123456789") }
+  ]) assert.equal((await api.claimLogicRollover({}, { ...sender, tab })).pending, null,
+    "only this source tab or its newly created child in the same project and origin can claim");
+  assert.equal((await api.claimLogicRollover({ requestId: "missing" }, {
+    ...sender, tab: { id: 17, url: destinationUrl }
+  })).pending, null, "an explicit missing request must not fall back to another");
   const sourceClaim = await api.claimLogicRollover({}, sender);
   assert.equal(sourceClaim.pending, null, "the source conversation must not claim its own rollover");
 
@@ -786,19 +800,23 @@ async function testBackgroundRolloverBinding() {
 
   const rootClaim = await api.claimLogicRollover({
     requestId: prepared.requestId,
-    selectedProjectName: "Money Tree"
+    selectedProjectName: "Example Project"
   }, {
     id: "extension-test-id",
     tab: { id: 17, url: "https://chatgpt.com/" }
   });
-  assert.equal(rootClaim.pending.previousTitle, "Initialize Example Research");
-  assert.equal(rootClaim.pending.count, 3);
-  assert.equal(rootClaim.pending.limit, 8);
-  assert.equal(rootClaim.pending.queuedPrompt, "Carry these extra instructions once");
-  assert.equal(rootClaim.pending.sourceUserFingerprint.sha256, "a".repeat(64));
-  assert.equal(rootClaim.pending.sourceUserFingerprint.length, 68);
-  assert.equal(rootClaim.pending.sourceUserFingerprint.renderedLength, 67);
-  assert.equal(rootClaim.pending.sourceUserFingerprint.renderedSha256, "b".repeat(64));
+  assert.equal(rootClaim.pending, null, "a root composer exposes a name, not a stable project ID");
+  const verifiedClaim = await api.claimLogicRollover({ requestId: prepared.requestId }, {
+    ...sender, tab: { id: 17, url: destinationUrl }
+  });
+  assert.equal(verifiedClaim.pending.previousTitle, "Initialize Example Research");
+  assert.equal(verifiedClaim.pending.count, 3);
+  assert.equal(verifiedClaim.pending.limit, 8);
+  assert.equal(verifiedClaim.pending.queuedPrompt, "Carry these extra instructions once");
+  assert.equal(verifiedClaim.pending.sourceUserFingerprint.sha256, "a".repeat(64));
+  assert.equal(verifiedClaim.pending.sourceUserFingerprint.length, 68);
+  assert.equal(verifiedClaim.pending.sourceUserFingerprint.renderedLength, 67);
+  assert.equal(verifiedClaim.pending.sourceUserFingerprint.renderedSha256, "b".repeat(64));
   for (const rendering of [{ renderedLength: 67 }, { renderedLength: 69, renderedSha256: "b".repeat(64) },
     { renderedLength: 67, renderedSha256: "bad" }]) {
     await assert.rejects(api.prepareLogicRollover({ projectSegment: project, previousTitle: "Old chat", message: "Continue",
@@ -821,10 +839,10 @@ async function testBackgroundRolloverBinding() {
     limit: 8,
     count: 3
   }, sender);
-  const destinationClaim = await api.claimLogicRollover({}, {
-    id: "extension-test-id",
-    tab: { id: 17, url: destinationUrl }
-  });
+  const destinationSender = { ...sender, tab: { id: 17, url: destinationUrl } };
+  const claims = await Promise.all([api.claimLogicRollover({}, destinationSender), api.claimLogicRollover({}, destinationSender)]);
+  assert.equal(claims.filter(result => result.pending).length, 1, "claim must be atomic");
+  const destinationClaim = claims.find(result => result.pending);
   assert.equal(destinationClaim.pending.previousTitle, "Initialize Example Research");
   assert.equal(destinationClaim.pending.count, 3);
   assert.equal(destinationClaim.pending.limit, 8);

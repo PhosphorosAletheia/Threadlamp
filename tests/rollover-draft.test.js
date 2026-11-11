@@ -121,6 +121,7 @@ function destination(timing, captureRun = true) {
       h.window.location = new URL(`https://chatgpt.com/g/${project}`);
       h.composer.textContent = submitted.replace(" a ", "  a ");
       h.setAlerts([]);
+      h.api.setTimeoutSnapshotsForTest(() => ({ element: null, text: "" }));
     };
     h.setRequestHandler(async request => {
       if (request.type === "LOGIC_ROLLOVER_PREPARE") { prepared = request; return { ok: true, requestId: "handoff" }; }

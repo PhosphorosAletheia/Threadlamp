@@ -36,7 +36,7 @@
   function canonicalUrl(value) {
     try {
       const url = new URL(value);
-      if (url.protocol !== "https:" || !["chatgpt.com", "chat.openai.com"].includes(url.hostname)) return "";
+      if (!["https://chatgpt.com", "https://chat.openai.com"].includes(url.origin) || url.username || url.password) return "";
       const match = url.pathname.match(/^\/(?:g\/[^/]+\/)?c\/([^/]+)\/?$/);
       if (!match) return "";
       // ChatGPT assigns a local conversation ID while the first prompt is
@@ -44,6 +44,13 @@
       if (/^local-chatgpt:/i.test(decodeURIComponent(match[1]))) return "";
       return url.origin + url.pathname.replace(/\/$/, "");
     } catch { return ""; }
+  }
+  function chatKey(value) {
+    return canonicalUrl(value).replace(/^(https:\/\/[^/]+\/g\/g-p-[a-f0-9]{32})(?:-[^/]+)?/i, "$1");
+  }
+  function sameChat(left, right) {
+    const key = chatKey(left);
+    return Boolean(key && key === chatKey(right));
   }
   function localClock(timeZone) {
     return new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hourCycle: "h23" });
@@ -72,5 +79,5 @@
     }
     throw new Error("No scheduled time was found in the next eight days.");
   }
-  globalThis.Heartbeat = { DEFAULT_PROMPT, normalize, canonicalUrl, nextRun, slotKey: (config, at) => config.kind === "daily" ? slot(localClock(config.timeZone), at).key : String(at) };
+  globalThis.Heartbeat = { DEFAULT_PROMPT, normalize, canonicalUrl, chatKey, sameChat, nextRun, slotKey: (config, at) => config.kind === "daily" ? slot(localClock(config.timeZone), at).key : String(at) };
 })();

@@ -55,10 +55,10 @@
   async function locate(record) {
     try {
       const tab = await chrome.tabs.get(record.tabId);
-      if (Heartbeat.canonicalUrl(tab.url) === record.url) return tab;
+      if (Heartbeat.sameChat(tab.url, record.url)) return tab;
     } catch { /* Browser restarts can change tab IDs. */ }
     const tabs = await chrome.tabs.query({ url: ["https://chatgpt.com/*", "https://chat.openai.com/*"] });
-    const matches = tabs.filter(tab => Heartbeat.canonicalUrl(tab.url) === record.url);
+    const matches = tabs.filter(tab => Heartbeat.sameChat(tab.url, record.url));
     if (matches.length !== 1) throw new Error(matches.length ? "The scheduled chat is open in multiple tabs. Save its schedule in the intended tab." : "The scheduled chat is not open. Open it and resume its schedule.");
     return matches[0];
   }
@@ -68,7 +68,7 @@
       if (record.tabId === sender.tab.id) return false;
       try {
         const owner = await chrome.tabs.get(record.tabId);
-        return Heartbeat.canonicalUrl(owner.url) === record.url;
+        return Heartbeat.sameChat(owner.url, record.url);
       } catch { return false; }
     };
     if (await ownedElsewhere()) return false;
@@ -175,7 +175,7 @@
         await DashboardWorker.verifyTarget(request.target);
         if (url !== request.target.url) throw new Error("The dashboard target conversation changed.");
       }
-      let record = Object.values(records).find(item => item.url === url);
+      let record = Object.values(records).find(item => Heartbeat.sameChat(item.url, url));
       if (request.type === "HB_GET") return { ok: true, schedule: publicRecord(record), defaultPrompt: Heartbeat.DEFAULT_PROMPT };
       if (request.type === "HB_SAVE") {
         const configuration = Heartbeat.normalize(request.configuration);
@@ -225,10 +225,10 @@
     if (request.type === "HB_AUTO_IDLE") {
       // Only the sending saved chat can request an automatic schedule. Never
       // replace another tab's owner or a deliberate disabled/paused schedule.
-      if (!url || url !== Heartbeat.canonicalUrl(request.url)) throw new Error("A saved, unchanged chat is required for an automatic heartbeat.");
+      if (!url || !Heartbeat.sameChat(url, request.url)) throw new Error("A saved, unchanged chat is required for an automatic heartbeat.");
       const tab = await chrome.tabs.get(sender.tab.id);
-      if (Heartbeat.canonicalUrl(tab.url) !== url) throw new Error("The chat changed before its heartbeat could be saved.");
-      const existing = Object.values(records).find(item => item.url === url);
+      if (!Heartbeat.sameChat(tab.url, url)) throw new Error("The chat changed before its heartbeat could be saved.");
+      const existing = Object.values(records).find(item => Heartbeat.sameChat(item.url, url));
       if (existing) {
         if (!await claimOwner(records, existing, request, sender, true)) {
           return { ok: true, schedule: null, detail: "This chat's heartbeat is still owned by another open tab of this conversation." };
@@ -246,13 +246,14 @@
       // HB_STATE sleeping. Stop/navigation during this request cannot arm it.
       return { ok: true, schedule: publicRecord(record) };
     }
-    let record = request.scheduleId ? records[request.scheduleId] : Object.values(records).find(item => item.url === url && item.enabled);
+    let record = request.scheduleId ? records[request.scheduleId] : Object.values(records).find(item => Heartbeat.sameChat(item.url, url) && item.enabled);
     if (!record) return { ok: true, schedule: null };
-    const pendingMatch = record.pendingDestination && record.tabId === sender.tab.id && (
+    const pendingMatch = record.pendingDestination && record.tabId === sender.tab.id
+      && new URL(sender.tab.url).origin === new URL(record.url).origin && (
       sameRolloverProject(record.projectSegment, projectSegmentFromUrl(sender.tab.url))
-      || (new URL(sender.tab.url).pathname === "/" && selectedProjectMatchesSegment(request.selectedProjectName, record.projectSegment))
+
     );
-    if (record.url !== url && !pendingMatch) return { ok: true, schedule: null };
+    if (!Heartbeat.sameChat(record.url, url) && !pendingMatch) return { ok: true, schedule: null };
     if (request.type === "HB_ATTACH") {
       if (!await claimOwner(records, record, request, sender)) return { ok: true, schedule: null };
       return { ok: true, schedule: publicRecord(record) };
@@ -299,7 +300,7 @@
     return serial(async () => {
       const records = await read();
       const sourceUrl = Heartbeat.canonicalUrl(rollover.sourceUrl);
-      const record = Object.values(records).find(item => item.enabled && item.url === sourceUrl && item.tabId === rollover.sourceTabId);
+      const record = Object.values(records).find(item => item.enabled && Heartbeat.sameChat(item.url, sourceUrl) && item.tabId === rollover.sourceTabId);
       if (!record) return;
       record.tabId = tab.id;
       record.url = Heartbeat.canonicalUrl(tab.url) || record.url;

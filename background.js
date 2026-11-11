@@ -17,7 +17,17 @@ const HA_KEEPALIVE_MS = 20 * 1000;
 const HA_CONNECT_TIMEOUT_MS = 10 * 1000;
 const HA_REQUEST_TTL_MS = 24 * 60 * 60 * 1000;
 const LOGIC_ROLLOVER_TTL_MS = 5 * 60 * 1000;
-const LOGIC_ROLLOVER_FALLBACK_CLAIM_MS = 60 * 1000;
+let rolloverQueue = Promise.resolve();
+function serializeRollover(operation) {
+  const result = rolloverQueue.then(operation);
+  rolloverQueue = result.catch(() => {});
+  return result;
+}
+const rolloverChildTabs = new Map();
+chrome.tabs.onCreated?.addListener(tab => {
+  if (Number.isInteger(tab.openerTabId)) rolloverChildTabs.set(tab.id, { opener: tab.openerTabId, createdAt: Date.now() });
+});
+chrome.tabs.onRemoved?.addListener(tabId => rolloverChildTabs.delete(tabId));
 const DEFAULT_APPROVAL_MESSAGE = "Approved. Continue with the current task.";
 const SETTINGS_SNAPSHOT_VERSION = 1;
 const CHATGPT_HOSTS = new Set(["chatgpt.com", "chat.openai.com"]);
@@ -33,6 +43,12 @@ let nextSocketMessageId = 1;
 let subscriptionMessageId = null;
 const actionsInProgress = new Set();
 let errorNotificationQueue = Promise.resolve();
+let pendingRequestQueue = Promise.resolve();
+function serializePendingRequest(operation) {
+  const result = pendingRequestQueue.then(operation);
+  pendingRequestQueue = result.catch(() => {});
+  return result;
+}
 let connection = {
   phase: "disabled",
   detail: "Home Assistant notifications are disabled.",
@@ -96,7 +112,8 @@ function normalizeBrief(value) {
 
 function isChatGptUrl(value = "") {
   try {
-    return CHATGPT_HOSTS.has(new URL(value).hostname);
+    const url = new URL(value);
+    return ["https://chatgpt.com", "https://chat.openai.com"].includes(url.origin) && !url.username && !url.password;
   } catch {
     return false;
   }
@@ -105,7 +122,7 @@ function isChatGptUrl(value = "") {
 function projectSegmentFromUrl(value = "") {
   try {
     const url = new URL(value);
-    if (!CHATGPT_HOSTS.has(url.hostname)) return "";
+    if (!isChatGptUrl(value)) return "";
     return url.pathname.match(/^\/g\/(g-p-[^/]+)(?:\/|$)/)?.[1] || "";
   } catch {
     return "";
@@ -115,7 +132,7 @@ function projectSegmentFromUrl(value = "") {
 function chatPathFromUrl(value = "") {
   try {
     const url = new URL(value);
-    if (!CHATGPT_HOSTS.has(url.hostname)) return "";
+    if (!isChatGptUrl(value)) return "";
     return url.pathname.replace(/\/+$/, "") || "/";
   } catch {
     return "";
@@ -174,6 +191,10 @@ function isTrustedChatSender(sender) {
     sender?.id === chrome.runtime.id
     && Number.isInteger(sender.tab?.id)
     && isChatGptUrl(sender.tab.url)
+    && (sender.frameId === undefined || sender.frameId === 0)
+    && (!sender.url || (isChatGptUrl(sender.url)
+      && new URL(sender.url).origin === new URL(sender.tab.url).origin
+      && chatPathFromUrl(sender.url) === chatPathFromUrl(sender.tab.url)))
   );
 }
 
@@ -484,6 +505,8 @@ async function haFetch(path, options = {}) {
   requireConfigured();
   const response = await fetch(new URL(path, config.baseUrl), {
     ...options,
+    redirect: "error",
+    signal: typeof AbortSignal !== "undefined" ? AbortSignal.timeout(15000) : undefined,
     headers: {
       Authorization: `Bearer ${config.token}`,
       "Content-Type": "application/json",
@@ -706,7 +729,10 @@ function dismissErrorNotification(action) {
   });
 }
 
-async function prepareLogicRollover(request, sender) {
+function prepareLogicRollover(request, sender) {
+  return serializeRollover(() => prepareLogicRolloverLocked(request, sender));
+}
+async function prepareLogicRolloverLocked(request, sender) {
   const sourceUrl = sender.tab.url;
   const sourcePath = chatPathFromUrl(sourceUrl);
   const projectSegment = projectSegmentFromUrl(sourceUrl);
@@ -778,19 +804,26 @@ async function prepareLogicRollover(request, sender) {
   return { ok: true, requestId };
 }
 
-async function claimLogicRollover(request, sender) {
+function claimLogicRollover(request, sender) {
+  return serializeRollover(() => claimLogicRolloverLocked(request, sender));
+}
+async function claimLogicRolloverLocked(request, sender) {
   const projectSegment = projectSegmentFromUrl(sender.tab.url);
   const currentPath = chatPathFromUrl(sender.tab.url);
-  const selectedProjectName = String(request.selectedProjectName || "").trim();
   const requestedId = String(request.requestId || "");
-  if (!projectSegment && (currentPath !== "/" || !selectedProjectName)) {
-    return { ok: true, pending: null };
-  }
+  if (!projectSegment) return { ok: true, pending: null };
 
   const pending = await prunePendingRollovers();
   const entries = Object.entries(pending)
     .filter(([, request]) => (
-      request.sourcePath !== currentPath
+      !Number.isInteger(request.claimedBy)
+      && new URL(sender.tab.url).origin === new URL(request.sourceUrl).origin
+      && (request.sourceTabId === sender.tab.id || (
+        request.sourceTabId === sender.tab.openerTabId
+        && rolloverChildTabs.get(sender.tab.id)?.opener === request.sourceTabId
+        && rolloverChildTabs.get(sender.tab.id).createdAt >= request.createdAt
+      ))
+      && request.sourcePath !== currentPath
       // A slug-only URL change is still the same saved conversation.
       && !(currentPath.match(/\/c\/([^/]+)$/)?.[1]
         && currentPath.match(/\/c\/([^/]+)$/)?.[1] === request.sourcePath.match(/\/c\/([^/]+)$/)?.[1])
@@ -798,43 +831,55 @@ async function claimLogicRollover(request, sender) {
       && (!request.projectHomeUrl || (request.sourceTabId === sender.tab.id
         && new URL(sender.tab.url).origin === new URL(request.sourceUrl).origin
         && (rolloverProjectHome(sender.tab.url, request.projectSegment) || currentPath === "/")))
-      && (
-        sameRolloverProject(request.projectSegment, projectSegment)
-        || (
-          currentPath === "/"
-          && selectedProjectMatchesSegment(selectedProjectName, request.projectSegment)
-        )
-      )
+      && sameRolloverProject(request.projectSegment, projectSegment)
     ))
     .sort(([, left], [, right]) => right.createdAt - left.createdAt);
 
-  let match = requestedId
-    ? entries.find(([requestId]) => requestId === requestedId)
-    : null;
-
-  if (!match) match = entries.find(([, request]) => (
-    request.sourceTabId === sender.tab.id
-    || request.sourceTabId === sender.tab.openerTabId
-  ));
-
+  const match = requestedId ? entries.find(([id]) => id === requestedId) : entries[0];
   if (!match) {
-    const recent = entries.filter(([, request]) => (
-      Date.now() - request.createdAt <= LOGIC_ROLLOVER_FALLBACK_CLAIM_MS
-    ));
-    if (recent.length === 1) match = recent[0];
+    const receipt = requestedId && pending[requestedId];
+    const owned = receipt && (receipt.sourceTabId === sender.tab.id || receipt.claimedBy === sender.tab.id);
+    return { ok: true, pending: null, completed: Boolean(owned && receipt.completed), claimed: Boolean(owned && receipt.claimedBy) };
   }
 
-  if (!match) return { ok: true, pending: null };
-
   const [requestId, rollover] = match;
-  if (typeof HeartbeatScheduler !== "undefined") await HeartbeatScheduler.transfer(rollover, sender.tab);
-  if (typeof ServerLinkWorker !== "undefined") await ServerLinkWorker.transfer(rollover, sender.tab);
-  delete pending[requestId];
+  rollover.claimedBy = sender.tab.id;
+  rollover.claimedUrl = sender.tab.url;
+  // Persist the claim before side effects. A worker restart must never replay it.
   await setPendingRollovers(pending);
   return { ok: true, pending: rollover };
 }
 
-async function cancelLogicRollover(request, sender) {
+function completeLogicRollover(request, sender) {
+  return serializeRollover(async () => {
+    const pending = await prunePendingRollovers();
+    const rollover = pending[String(request.requestId || "")];
+    if (!rollover || rollover.claimedBy !== sender.tab.id
+      || new URL(sender.tab.url).origin !== new URL(rollover.sourceUrl).origin
+      || !sameRolloverProject(projectSegmentFromUrl(sender.tab.url), rollover.projectSegment)) {
+      throw new Error("The handoff receipt no longer belongs to this chat. Inspect the continuation before retrying.");
+    }
+    if (request.type === "LOGIC_ROLLOVER_CHECK") {
+      if (rollover.completed) throw new Error("This handoff was already completed. It cannot send another startup.");
+      return { ok: true };
+    }
+    if (!rollover.completed) {
+      if (rollover.completing) throw new Error("The extension restarted during the handoff. Inspect the destination and its connections before resuming.");
+      rollover.completing = true;
+      await setPendingRollovers(pending);
+      if (typeof HeartbeatScheduler !== "undefined") await HeartbeatScheduler.transfer(rollover, sender.tab);
+      if (typeof ServerLinkWorker !== "undefined") await ServerLinkWorker.transfer(rollover, sender.tab);
+      rollover.completed = true;
+      await setPendingRollovers(pending);
+    }
+    return { ok: true, heartbeatSchedule: rollover.heartbeatSchedule, serverLinkTransfer: rollover.serverLinkTransfer };
+  });
+}
+
+function cancelLogicRollover(request, sender) {
+  return serializeRollover(() => cancelLogicRolloverLocked(request, sender));
+}
+async function cancelLogicRolloverLocked(request, sender) {
   const requestId = String(request.requestId || "");
   const pending = await getPendingRollovers();
   const rollover = pending[requestId];
@@ -845,7 +890,7 @@ async function cancelLogicRollover(request, sender) {
 
   delete pending[requestId];
   await setPendingRollovers(pending);
-  return { ok: true, removed: true };
+  return { ok: true, removed: true, completed: Boolean(rollover.completed), claimed: Boolean(rollover.claimedBy) };
 }
 
 async function waitForSocket(timeoutMs = HA_CONNECT_TIMEOUT_MS) {
@@ -859,7 +904,10 @@ async function waitForSocket(timeoutMs = HA_CONNECT_TIMEOUT_MS) {
   return false;
 }
 
-async function sendUserInputNotification(request, sender) {
+function sendUserInputNotification(request, sender) {
+  return serializePendingRequest(() => sendUserInputNotificationLocked(request, sender));
+}
+async function sendUserInputNotificationLocked(request, sender) {
   requireConfigured();
   const socketReady = await waitForSocket();
   if (!socketReady) {
@@ -871,7 +919,7 @@ async function sendUserInputNotification(request, sender) {
   const tabId = sender.tab.id;
   const pending = await prunePendingRequests();
   const existingEntry = Object.entries(pending).find(([, item]) => (
-    item.tabUrl === tabUrl && item.brief === brief
+    item.tabId === tabId && item.tabUrl === tabUrl && item.brief === brief
   ));
 
   if (existingEntry) {
@@ -910,12 +958,6 @@ async function sendUserInputNotification(request, sender) {
   };
   if (config.persistent) Object.assign(data, { persistent: true, sticky: true });
 
-  await callNotifyService({
-    title: "ChatGPT needs your input",
-    message: brief,
-    data
-  });
-
   pending[requestId] = {
     requestId,
     tabId,
@@ -928,6 +970,17 @@ async function sendUserInputNotification(request, sender) {
     expiresAt: Date.now() + HA_REQUEST_TTL_MS
   };
   await setPendingRequests(pending);
+  try {
+    await callNotifyService({
+      title: "ChatGPT needs your input",
+      message: brief,
+      data
+    });
+  } catch (error) {
+    delete pending[requestId];
+    await setPendingRequests(pending);
+    throw error;
+  }
   return { ok: true, enabled: true, requestId, deduplicated: false };
 }
 
@@ -939,7 +992,10 @@ async function clearPhoneNotification(tag) {
   });
 }
 
-async function removePendingRequest(requestId, clearNotification = true) {
+function removePendingRequest(requestId, clearNotification = true) {
+  return serializePendingRequest(() => removePendingRequestLocked(requestId, clearNotification));
+}
+async function removePendingRequestLocked(requestId, clearNotification = true) {
   const pending = await getPendingRequests();
   const request = pending[requestId];
   if (!request) return false;
@@ -951,15 +1007,18 @@ async function removePendingRequest(requestId, clearNotification = true) {
   return true;
 }
 
-async function cancelPendingRequest(request, sender) {
+function cancelPendingRequest(request, sender) {
+  return serializePendingRequest(() => cancelPendingRequestLocked(request, sender));
+}
+async function cancelPendingRequestLocked(request, sender) {
   const requestId = String(request.requestId || "");
   const pending = await getPendingRequests();
   const item = pending[requestId];
   if (!item) return { ok: true, removed: false };
-  if (item.tabId !== sender.tab.id && item.tabUrl !== sender.tab.url) {
+  if (item.tabId !== sender.tab.id || item.tabUrl !== sender.tab.url) {
     throw new Error("That Home Assistant request belongs to another conversation.");
   }
-  await removePendingRequest(requestId);
+  await removePendingRequestLocked(requestId);
   return { ok: true, removed: true };
 }
 
@@ -1016,7 +1075,7 @@ async function handleNotificationAction(data) {
   }
   if (!action.startsWith("CHATGPT_APPROVE_") && !action.startsWith("CHATGPT_REPLY_")) return;
 
-  const pending = await prunePendingRequests();
+  const pending = await serializePendingRequest(prunePendingRequests);
   const request = Object.values(pending).find((item) => (
     item.approveAction === action || item.replyAction === action
   ));
@@ -1045,7 +1104,7 @@ async function handleNotificationAction(data) {
       tabUrl: request.tabUrl,
       message,
       responseType: isApprove ? "approve" : "reply"
-    });
+    }, { frameId: 0 });
 
     if (!result?.accepted) {
       throw new Error(result?.detail || "The ChatGPT tab rejected the response.");
@@ -1155,7 +1214,7 @@ function restartConnection() {
 async function initialize() {
   await protectStorage();
   await loadConfig();
-  await Promise.all([prunePendingRequests(), prunePendingRollovers()]);
+  await Promise.all([serializePendingRequest(prunePendingRequests), serializeRollover(prunePendingRollovers)]);
   if (config.enabled) connectSocket();
 }
 
@@ -1226,6 +1285,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       case "LOGIC_ROLLOVER_CLAIM":
         if (!isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
         return claimLogicRollover(request, sender);
+
+      case "LOGIC_ROLLOVER_CHECK":
+      case "LOGIC_ROLLOVER_COMPLETE":
+        if (!isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
+        return completeLogicRollover(request, sender);
 
       case "LOGIC_ROLLOVER_CANCEL":
         if (!isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
