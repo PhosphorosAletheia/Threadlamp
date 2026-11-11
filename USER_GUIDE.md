@@ -72,11 +72,23 @@ a sleeping computer. Busy cycles skip overlapping wakeups. Missing or ambiguous
 tabs and uncertain dispatch require attention. Pause or disable schedules when
 finished. A per-cycle follow-up limit does not cap the number of future cycles.
 
+Errors and automatic message-limit stops remain in the on-page banner until you
+select **Dismiss**. Dismissing a notice does not send a message or restart a run.
+
 ## Conversation rollover
 
 For supported conversation-length notices, project rollover can continue in a
 verified new chat in the same project. This depends on ChatGPT's current English
-UI and available navigation. It does not extend the model context or reset an
+UI and available navigation. Threadlamp prefers an observed project navigation
+link that keeps the stable project ID visible. A project name by itself cannot
+verify a destination. If ChatGPT opens a page that exposes only a name, Threadlamp
+stops with a notice instead of guessing. Existing conversations are never used
+as automatic handoff destinations. The continuation includes the source project
+ID and chat link; the agent must request missing context if it cannot access it.
+
+A successful handoff means the continuation message was observed in the new chat;
+it does not verify that the model recovered all prior context. Review the first
+response. Threadlamp does not extend the model context or reset an
 account usage allowance. Quota errors must not be treated as permission to bypass
 limits. Check the live chat if a service or quota notice appears.
 

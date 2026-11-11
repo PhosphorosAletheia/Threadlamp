@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.8 beta 1
+
+- Keep errors and message-limit stops visible until dismissed.
+- Bind handoffs to the source tab or its newly created child, using stable project
+  IDs. Existing conversations cannot receive an automatic handoff.
+- Prevent duplicate handoff claims and confirm the continuation before moving
+  heartbeat schedules or server connections.
+- Stop automatic sends and quick prompts when the chat or draft changes.
+- Preserve heartbeat schedule identity when a project is renamed.
+- Keep phone approvals bound to their original tab and conversation; protect
+  simultaneous notification updates and reject redirected notification requests.
+
 ## 1.9.7 beta 1
 
 - Fix queued follow-ups stopping before Send when the ChatGPT editor adds an
