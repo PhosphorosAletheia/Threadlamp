@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.9 beta 1
+
+- Fix dashboard project names being replaced by the accessibility label
+  "Skip to content". Clear previously saved instances of that label and preserve
+  valid project names when older chat tabs report it.
+
 ## 1.9.8 beta 1
 
 - Keep errors and message-limit stops visible until dismissed.

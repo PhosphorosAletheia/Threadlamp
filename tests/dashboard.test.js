@@ -16,6 +16,14 @@ async function projectTitleTests() {
   const f = page();
   const projectUrl = sourceUrl.replace(/\/c\/source$/, "/project");
   const link = (title, href = projectUrl) => visibleElement(title, { href });
+  f.window.location = new URL(projectUrl);
+  f.setSelector("a[href]", [link("Skip to content", "#main")]);
+  assert.equal(f.api.dashboardSnapshot().projectTitle, "", "a project-home skip link is not a project name");
+  f.setSelector("a[href]", [link("Skip to content", "#main"), link("Example Project")]);
+  assert.equal(f.api.dashboardSnapshot().projectTitle, "Example Project", "skip links cannot obscure a genuine project name");
+  f.setSelector("a[href]", [link("Skip to content", `${projectUrl}#main`), link("", ""), link("Example Project")]);
+  assert.equal(f.api.dashboardSnapshot().projectTitle, "Example Project", "absolute fragment links are also excluded");
+  f.window.location = new URL(sourceUrl);
   const transcriptLink = link("Untrusted transcript title");
   transcriptLink.closest = () => ({});
   const otherProject = projectUrl.replace("0123456789abcdef0123456789abcdef", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
@@ -88,6 +96,26 @@ async function projectTitleTests() {
   h.tabs.get(17).url = sourceUrl.replace("-job-search", "");
   list = await h.dispatch({ type: "DB_LIST" });
   assert.equal(list.agents.find(a => a.tabId === 17).title, "Project (name unavailable)");
+
+  h.local.values.logicDashboardHistory.projectTitles = { "g-p-0123456789abcdef0123456789abcdef": "Skip to content" };
+  const polluted = Object.values(h.local.values.logicDashboardHistory.agents).find(a => a.tabId === 42);
+  polluted.title = polluted.projectTitle = "Skip to content";
+  h.local.values.logicDashboardHistory.events.push({ id: "polluted-event", agentKey: polluted.key, url: polluted.url,
+    title: "Skip to content", projectTitle: "Skip to content" });
+  snapshots.delete(42);
+  snapshots.set(17, { instanceId: "page-17", revision: "1", url: h.tabs.get(17).url,
+    projectTitle: "Skip to content", detail: "Working" });
+  list = await h.dispatch({ type: "DB_LIST" });
+  assert.equal(list.agents.find(a => a.tabId === 17).title, "Project (name unavailable)", "old content scripts cannot restore polluted labels");
+  assert.equal(h.local.values.logicDashboardHistory.projectTitles["g-p-0123456789abcdef0123456789abcdef"], undefined, "polluted cache entries are removed");
+  assert.equal(list.events.find(e => e.id === "polluted-event").title, "job search", "offline history also repairs polluted titles");
+  snapshots.get(17).projectTitle = "Example Project";
+  list = await h.dispatch({ type: "DB_LIST" });
+  assert.equal(list.agents.find(a => a.tabId === 17).title, "Example Project", "a fresh name repairs the dashboard");
+  assert.ok(list.events.filter(e => e.tabId === 17).every(e => e.title === "Example Project"), "history uses the repaired project name");
+  snapshots.get(17).projectTitle = "Skip to main content";
+  list = await h.dispatch({ type: "DB_LIST" });
+  assert.equal(list.agents.find(a => a.tabId === 17).title, "Example Project", "older pages cannot overwrite a repaired project name");
 }
 
 async function contentTests() {

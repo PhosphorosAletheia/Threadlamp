@@ -13,6 +13,10 @@
   const pageActions = new Set(["start_loop", "stop", "start_logic", "resume_logic", "pause", "resume",
     "next_cycle", "queue", "cancel_queue", "continue", "status", "reply", "approve"]);
   const limit = (value, size) => String(value || "").slice(0, size);
+  const projectName = value => {
+    const name = limit(value, 200).replace(/\s+/g, " ").trim();
+    return /^skip to (?:main )?content$/i.test(name) ? "" : name;
+  };
   const cleanUrl = value => {
     try { const url = new URL(value); return isChatGptUrl(url.href) && url.protocol === "https:" ? url.origin + url.pathname : ""; }
     catch { return ""; }
@@ -20,7 +24,7 @@
   function labels(data, agent) {
     const projectId = ServerLink.projectId(agent.url);
     const chatTitle = limit(agent.chatTitle || agent.title, 200) || "Untitled chat";
-    let projectTitle = limit(data.projectTitles?.[projectId] || agent.projectTitle, 200);
+    let projectTitle = projectName(data.projectTitles?.[projectId]) || projectName(agent.projectTitle);
     if (projectId && !projectTitle) {
       // Older/unavailable content scripts can still supply a readable project slug.
       const segment = new URL(agent.url).pathname.split("/")[2];
@@ -51,6 +55,16 @@
       await initializationPromise;
       const data = (await chrome.storage.local.get(KEY))[KEY] || { agents: {}, events: [] };
       const before = JSON.stringify(data);
+      // Repair names saved by older content scripts, including offline history.
+      for (const [id, title] of Object.entries(data.projectTitles || {})) {
+        if (!projectName(title)) delete data.projectTitles[id];
+      }
+      for (const entry of [...Object.values(data.agents || {}), ...(data.events || [])]) {
+        if (entry.projectTitle && !projectName(entry.projectTitle)) {
+          entry.projectTitle = "";
+          if (!projectName(entry.title)) entry.title = entry.chatTitle || "";
+        }
+      }
       const value = await work(data);
       if (JSON.stringify(data) !== before) await chrome.storage.local.set({ [KEY]: data });
       return value;
@@ -63,7 +77,7 @@
       const key = `${tab.id}:${snapshot.instanceId}:${snapshot.url}`;
       const previous = data.agents[key];
       const projectId = ServerLink.projectId(snapshot.url);
-      const projectTitle = limit(snapshot.projectTitle, 200).trim();
+      const projectTitle = projectName(snapshot.projectTitle);
       if (projectId && projectTitle && data.projectTitles?.[projectId] !== projectTitle) {
         data.projectTitles = Object.fromEntries([
           ...Object.entries(data.projectTitles || {}).filter(([id]) => id !== projectId),
@@ -127,7 +141,7 @@
         const agent = data.agents[event.agentKey];
         return { ...event, title: labels(data, { ...event, url: event.url || agent?.url,
           projectTitle: event.projectTitle || agent?.projectTitle }).title };
-      }), version: chrome.runtime.getManifest?.().version || "1.9.8" };
+      }), version: chrome.runtime.getManifest?.().version || "1.9.9" };
   }
   async function inspect(target, sender) {
     await verifyTarget(target);

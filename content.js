@@ -314,12 +314,16 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     for (const link of document.querySelectorAll("a[href]")) {
       if (!isVisible(link) || link.closest("article, [data-message-author-role], [data-message-content], .markdown, .prose")) continue;
       try {
-        const url = new URL(link.getAttribute("href"), window.location.href);
-        if (url.origin !== window.location.origin || ServerLink.projectId(url.href) !== projectId
+        const href = String(link.getAttribute("href") || "").trim();
+        // On a project home page, #main resolves to that same project's URL.
+        // Accessibility jumps are not project navigation or name evidence.
+        if (!href || href.startsWith("#")) continue;
+        const url = new URL(href, window.location.href);
+        if (url.hash || url.username || url.password || url.origin !== window.location.origin || ServerLink.projectId(url.href) !== projectId
           || !/^\/g\/[^/]+(?:\/project)?\/?$/.test(url.pathname)) continue;
         const title = String(link.innerText || link.textContent || "")
           .replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
-        if (title) titles.add(title);
+        if (title && !/^skip to (?:main )?content$/i.test(title)) titles.add(title);
       } catch { /* Ignore malformed navigation links. */ }
     }
     return titles.size === 1 ? [...titles][0] : "";
