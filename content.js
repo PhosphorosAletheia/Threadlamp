@@ -3280,6 +3280,9 @@ ${LOGIC_START_PROMPT}
           if (!expected || !await matchesSubmittedRolloverDraft(previousUser.text, await rolloverDraftFingerprint(expected))) {
             throw new Error("The continuation could not be verified in the new chat. Inspect it before resuming.");
           }
+          if (!state.running || state.runId !== runId) return;
+          await assertRunLocation(runId);
+          if (!state.running || state.runId !== runId) return;
           const receipt = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_COMPLETE", requestId: startupFailureContext.failureId });
           if (!receipt?.ok) throw new Error(receipt?.error || "The continuation was sent, but the handoff receipt could not be confirmed. Inspect the new chat.");
           if (receipt.heartbeatSchedule) heartbeatSchedule = receipt.heartbeatSchedule;
