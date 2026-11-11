@@ -9,13 +9,14 @@ const { fixture } = require("./delivery-timeout.test.js");
 
 (async () => {
   for (const mode of ["logic", "loop"]) {
-    for (const change of ["draft", "navigation", "manual-message"]) {
+    for (const change of ["draft", "navigation", "manual-message", "error"]) {
       const f = fixture(); f.hide();
       f.api.state.mode = mode; f.api.state.limit = 1;
       f.setWriter((composer, text) => {
         composer.innerText = composer.textContent = change === "draft" ? `${text} edited by user` : text;
         if (change === "navigation") f.window.location = new URL("https://chatgpt.com/c/another-agent");
         if (change === "manual-message") f.newUser();
+        if (change === "error") f.api.state.error = true;
         f.setSelector("button[data-testid='send-button']", [f.send]);
         return true;
       });
@@ -25,6 +26,15 @@ const { fixture } = require("./delivery-timeout.test.js");
       assert.ok(f.api.getOverlayForTest(), "ownership failures stay visible");
     }
   }
+
+  const guarded = fixture(); guarded.hide();
+  await assert.rejects(guarded.api.submitMessage(1, "Continue", "Sending", null, 8000, async () => {
+    await Promise.resolve();
+    guarded.composer.innerText = guarded.composer.textContent = "Manual draft during an asynchronous guard";
+    return true;
+  }), /chat or draft changed/);
+  assert.equal(guarded.writes.length, 0, "an asynchronous check cannot authorize overwriting a new manual draft");
+  assert.deepEqual(guarded.sends, []);
 
   for (const paused of [false, true]) {
     const f = fixture(); f.hide();

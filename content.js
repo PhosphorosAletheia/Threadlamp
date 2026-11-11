@@ -1485,7 +1485,7 @@ ${LOGIC_START_PROMPT}
       false,
       buildRolloverPrompt(previousTitle, pending.sourceUrl),
       `Sending the continuation and Logic Mode instructions for “${previousTitle}”…`,
-      { previousTitle, failureId: pending.requestId, projectSegment: pending.projectSegment, serverLinkTransfer: pending.serverLinkTransfer }
+      { previousTitle, failureId: pending.requestId, projectSegment: pending.projectSegment }
     );
   }
 
@@ -2688,6 +2688,7 @@ ${LOGIC_START_PROMPT}
     const addition = includeQueuedPrompt ? queuedPromptForLocation() : null;
     if (addition && queuedPromptInFlight) throw new Error("A queued prompt is already being prepared.");
     const userBeforeAddition = addition ? latestMessageSnapshot("user") : null;
+    const sendMode = state.mode;
     const serverUrl = window.location.href;
     const serverUser = latestMessageSnapshot("user");
     let serverLease = null;
@@ -2706,7 +2707,7 @@ ${LOGIC_START_PROMPT}
       // replace an editor only when its complete draft still matches.
       if (window.location.href !== serverUrl
         || snapshotChanged(latestMessageSnapshot("user"), serverUser)
-        || state.paused
+        || state.paused || state.error || state.mode !== sendMode
         || ((!expectedDraft || serverLease) && currentComposer !== composer)
         || !currentComposer || !composerDraftMatches(currentComposer, expectedDraft) || isGenerating()) {
         throw new Error("The chat or draft changed while preparing the automatic message. No message was sent.");
@@ -2734,6 +2735,7 @@ ${LOGIC_START_PROMPT}
       checkAddition("");
       if (sendGuard && !await sendGuard(composer, "")) return false;
       if (!state.running || state.runId !== runId) return false;
+      checkAddition("");
 
       setDetail(typingDetail);
       const bannerEditor = overlayHost?.shadowRoot.activeElement;
@@ -3273,10 +3275,6 @@ ${LOGIC_START_PROMPT}
 
         previousUser = await waitForUserMessage(runId, userBeforeStart, true);
         if (!previousUser || state.runId !== runId) return;
-        if (startupFailureContext?.serverLinkTransfer && snapshotChanged(previousUser, userBeforeStart)
-          && previousUser.text.trim().startsWith(startPrompt.trim())) {
-          void bindServerDestination(runId, startupFailureContext.serverLinkTransfer, startPrompt);
-        }
         if (startupFailureContext?.failureId) {
           const expected = runOwnership?.submitted?.text;
           if (!expected || !await matchesSubmittedRolloverDraft(previousUser.text, await rolloverDraftFingerprint(expected))) {
