@@ -105,6 +105,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   };
 
   let overlayHost = null;
+  let terminalNotice = false;
   let idleLogicUrl = "";
   let promptControlsExpanded = false;
   const QUEUED_PROMPT_LIMIT = 8000;
@@ -2012,7 +2013,8 @@ ${LOGIC_START_PROMPT}
     return true;
   }
 
-  function setDetail(detail, error = false) {
+  function setDetail(detail, error = false, retainNotice = false) {
+    terminalNotice = !state.running && (error || retainNotice);
     if (state.mode === "logic" && state.paused) {
       state.pausedDetail = detail;
       state.error = error;
@@ -2200,6 +2202,7 @@ ${LOGIC_START_PROMPT}
         <button class="pause" type="button" hidden>Pause</button>
         <button class="toggle-prompt" type="button" aria-expanded="false" aria-controls="next-round-controls" hidden>Show prompt</button>
         <button class="stop" type="button">Stop</button>
+        <button class="dismiss" type="button" hidden>Dismiss</button>
         <div id="next-round-controls" class="prompt-queue" hidden>
           <label for="next-round-prompt">Extra instructions for the next round</label>
           <textarea id="next-round-prompt" class="prompt-input" rows="2" maxlength="8000" placeholder="Type a prompt, then click Queue for next round"></textarea>
@@ -2219,6 +2222,10 @@ ${LOGIC_START_PROMPT}
       promptControlsExpanded = !promptControlsExpanded;
       updatePromptControls();
     });
+    shadow.querySelector(".dismiss").addEventListener("click", () => {
+      terminalNotice = false;
+      updateOverlay();
+    });
     shadow.querySelector(".stop").addEventListener("click", stopLoop);
     shadow.querySelector(".prompt-input").addEventListener("input", updatePromptControls);
     // Keep typing and Enter local to this editor instead of page shortcuts.
@@ -2236,7 +2243,7 @@ ${LOGIC_START_PROMPT}
 
   function updateOverlay() {
     const idleCycle = isIdleLogicCycle();
-    if (!state.running && !queuedPrompt && !idleCycle) {
+    if (!state.running && !queuedPrompt && !idleCycle && !terminalNotice) {
       overlayHost?.remove();
       overlayHost = null;
       return;
@@ -2248,7 +2255,8 @@ ${LOGIC_START_PROMPT}
     const timer = overlayHost.shadowRoot.querySelector(".timer");
     const pauseButton = overlayHost.shadowRoot.querySelector(".pause");
     const label = state.mode === "setup" ? "Server setup" : state.mode === "logic" || queuedPrompt ? "Logic mode" : "Continue loop";
-    headline.textContent = `${label}${idleCycle ? " · Idle" : ""} · ${state.count}/${state.limit}`;
+    headline.textContent = terminalNotice ? "Threadlamp · Stopped" : `${label}${idleCycle ? " · Idle" : ""} · ${state.count}/${state.limit}`;
+    overlayHost.shadowRoot.querySelector(".dismiss").hidden = !terminalNotice;
     detail.textContent = state.detail;
 
     pauseButton.hidden = (
@@ -3124,7 +3132,7 @@ ${LOGIC_START_PROMPT}
       state.userInputBrief = "";
       state.rolloverEnabled = false;
       state.rolloverRequestId = null;
-      setDetail("Logic Mode stopped. The shutdown instruction was sent.");
+      setDetail(`${detail === "Stopping Logic Mode…" ? "Logic Mode stopped." : detail.replace(/ Sending shutdown instruction…$/, "")} The shutdown instruction was sent.`, false, true);
       updateOverlay();
       return true;
     } catch (error) {
@@ -3461,7 +3469,7 @@ ${LOGIC_START_PROMPT}
           state.mode = "idle";
           state.logicPhase = "idle";
           state.waitUntil = null;
-          setDetail(`Finished. Sent ${state.count} message${state.count === 1 ? "" : "s"}.`);
+          setDetail(`Finished. Sent ${state.count} message${state.count === 1 ? "" : "s"}.`, false, true);
           updateOverlay();
           return;
         }
@@ -3736,7 +3744,7 @@ ${LOGIC_START_PROMPT}
       : "";
     state.rolloverRequestId = null;
     state.rolloverEnabled = false;
-    setDetail(`Stopped: this conversation has reached ChatGPT's maximum length.${limitDetail}`, !stoppedAtLimit);
+    setDetail(`Stopped: this conversation has reached ChatGPT's maximum length.${limitDetail}`, !stoppedAtLimit, true);
     if (!stoppedAtLimit) void requestHomeAssistantError(state.detail);
     updateOverlay();
     return publicStatus();

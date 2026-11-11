@@ -86,6 +86,27 @@ async function runTests() {
   shadow.querySelector(".stop").handlers.click();
   assert.equal(f.api.getOverlayForTest(), null);
   assert.deepEqual(f.sends, [], "Stop on a stale idle banner must not send in another chat");
+  f = fixture();
+  f.hide();
+  f.api.failSendsForTest();
+  await f.run();
+  assert.equal(f.api.state.running, false);
+  assert.ok(f.api.getOverlayForTest(), "a fatal same-chat error stays visible");
+  shadow = f.api.getOverlayForTest().shadowRoot;
+  assert.match(shadow.querySelector(".detail").textContent, /Send button is unavailable/);
+  assert.equal(shadow.querySelector(".dismiss").hidden, false);
+  shadow.querySelector(".dismiss").handlers.click();
+  assert.equal(f.api.getOverlayForTest(), null);
+  assert.deepEqual(f.sends, [], "dismissing a notice never sends");
+
+  f = fixture();
+  f.hide();
+  f.api.state.count = f.api.state.limit;
+  await f.run();
+  assert.equal(f.api.state.running, false);
+  assert.ok(f.api.getOverlayForTest(), "limit shutdown stays visible");
+  assert.match(f.api.state.detail, /5-message limit/);
+  assert.equal(f.sends.length, 1, "only the shutdown instruction is sent");
   console.log("idle banner tests passed");
 }
 
