@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.13 beta 1
+
+- Allow a verified project-chat continuation to start while its heartbeat schedule
+  still belongs to the source conversation. Recheck ownership before writing and sending.
+- Move the schedule only after the continuation is confirmed in the new chat;
+  ordinary navigation and cancelled handoffs still stop automatic sending.
+
 ## 1.9.12 beta 1
 
 - Ignore prior conversation turns retained inside hidden page subtrees when

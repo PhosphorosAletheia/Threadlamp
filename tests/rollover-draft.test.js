@@ -180,6 +180,70 @@ function retainedHistory(h) {
   assert.match(sent[0], /Start Logic Mode for this conversation/);
   assert.equal(sent[0].includes(submitted), false);
   assert.equal(actual.api.state.error, false);
+  // Same-tab navigation retains the source heartbeat until delivery is proven.
+  // It must permit the claimed startup, without authorizing ordinary sends or
+  // a different source, project, receipt, or conversation.
+  for (const scenario of ["valid", "unconfirmed", "ordinary", "wrong-source", "wrong-project", "no-receipt", "cancel-before-write",
+    "cancel-before-send", "navigate-during-check", "schedule-during-check", "turn-during-check"]) {
+    const h = destination(undefined, false);
+    h.composer.textContent = "";
+    const history = retainedHistory(h);
+    const form = visibleElement();
+    const high = visibleElement("High", {"aria-label":"Select ChatGPT model", "aria-haspopup":"menu", "aria-expanded":"false"});
+    form.querySelectorAll = () => [high];
+    h.composer.closest = selector => selector === "form" ? form : null;
+    let writes = 0, clicks = 0, completed = false, checks = 0;
+    h.api.prepareThinkingSendForTest(h.composer, (target, text) => { writes++; target.textContent = text; return true; });
+    const schedule = {id:"source-schedule", enabled:true, phase:"active", url:sourceUrl};
+    h.api.configureHeartbeat(scenario === "wrong-source" ? {...schedule, url:sourceUrl + "-other"} : schedule);
+    const send = visibleElement("Send");
+    let delivered = "";
+    send.click = () => {
+      assert.equal(h.api.getHeartbeatForTest().url, scenario === "wrong-source" ? sourceUrl + "-other" : sourceUrl);
+      assert.equal(completed, false, "schedule transfer cannot precede Send");
+      clicks++; delivered = h.composer.textContent; h.composer.textContent = "";
+    };
+    h.setSelector("button[data-testid='send-button']", [send]);
+    h.api.observeStartupForTest(async () => scenario === "unconfirmed" ? null : ({element:visibleElement(delivered), text:delivered}));
+    h.setRequestHandler(async request => {
+      if (request.type === "LOGIC_ROLLOVER_CHECK") {
+        checks++;
+        // The first check validates the claim before starting the run.
+        if (checks === 2) {
+          if (scenario === "cancel-before-write") return {ok:false, error:"Handoff cancelled"};
+          if (scenario === "navigate-during-check") h.window.location = new URL(sourceUrl + "-other");
+          if (scenario === "schedule-during-check") h.api.configureHeartbeat({...schedule, url:sourceUrl + "-other"});
+          if (scenario === "turn-during-check") history.hidden.display = "block";
+        }
+        if (scenario === "cancel-before-send" && writes) return {ok:false, error:"Handoff cancelled"};
+      }
+      if (request.type === "LOGIC_ROLLOVER_COMPLETE") {
+        assert.equal(clicks, 1);
+        assert.equal(h.api.getHeartbeatForTest().url, sourceUrl);
+        completed = true;
+        return {ok:true, heartbeatSchedule:{...schedule, url:sourceUrl + "-destination"}};
+      }
+      return {ok:true};
+    });
+    const runs = h.api.trackLogicRunsForTest();
+    const pending = {...h.pending, sourceUrl, requestId:scenario === "no-receipt" ? undefined : "receipt"};
+    if (scenario === "wrong-project") pending.sourceUrl = sourceUrl.replace("0123456789abcdef0123456789abcdef", "abcdef0123456789abcdef0123456789");
+    if (scenario === "ordinary") {
+      Object.assign(h.api.state, {running:true, mode:"logic", logicPhase:"monitoring", runId:1});
+      await assert.rejects(h.api.submitMessage(1, "Continue", "Sending"), /left the scheduled conversation/);
+    } else {
+      await h.api.startClaimedLogicRollover(pending);
+      await Promise.all(runs);
+    }
+    assert.equal(clicks, ["valid", "unconfirmed"].includes(scenario) ? 1 : 0, scenario);
+    assert.equal(completed, scenario === "valid", scenario);
+    assert.equal(writes, ["valid", "unconfirmed", "cancel-before-send"].includes(scenario) ? 1 : 0, scenario);
+    if (scenario === "unconfirmed") assert.equal(h.api.getHeartbeatForTest().url, sourceUrl);
+    if (scenario === "valid") {
+      assert.equal(h.api.state.error, false);
+      assert.equal(h.api.getHeartbeatForTest().url, sourceUrl + "-destination");
+    }
+  }
   for (const draft of [submitted.toUpperCase(), `${submitted} More instructions.`, submitted.replace("1080p", "720p"), `${submitted}\u200B`, submitted.replace(" a ", "\ta "), submitted.replace(" a ", "\u00a0a "), submitted.replace(".", "!")]) {
     const h = destination();
     h.composer.textContent = draft;

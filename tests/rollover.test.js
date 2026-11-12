@@ -65,6 +65,10 @@ function exposeContentFunctions(source) {
         writeToComposer = writer || ((target, text) => { target.innerText = target.textContent = text; return true; });
         waitForUserMessage = async () => null;
       },
+      observeStartupForTest(reader) {
+        waitForUserMessage = reader;
+        waitForAssistantResponse = async () => null;
+      },
       publicStatus,
       normalizeText,
       hasMaximumLengthNotice,

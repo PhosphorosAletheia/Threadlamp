@@ -1104,6 +1104,33 @@ ${LOGIC_START_PROMPT}
     } catch { return false; }
   }
 
+  async function assertHeartbeatSendLocation(runId, handoff, detail) {
+    const schedule = heartbeatSchedule;
+    if (!schedule?.enabled || heartbeatMatchesLocation(schedule)) return;
+    const destinationUrl = window.location.href;
+    const ownsHandoff = () => {
+      try {
+        return Boolean(handoff?.failureId && handoff.sourceUrl
+          && heartbeatSchedule === schedule
+          && state.running && state.runId === runId && !state.paused && !state.error
+          && state.mode === "logic" && state.logicPhase === "starting"
+          && window.location.href === destinationUrl
+          && new URL(handoff.sourceUrl).origin === new URL(destinationUrl).origin
+          && /\/c\/[^/]+\/?$/.test(new URL(handoff.sourceUrl).pathname)
+          && chatIdentity(schedule.url) === chatIdentity(handoff.sourceUrl)
+          && sameRolloverProject(projectSegmentFromLocation(handoff.sourceUrl), handoff.projectSegment)
+          && destinationMatchesProject(handoff.projectSegment)
+          && !rolloverDestinationHasMessages());
+      } catch { return false; }
+    };
+    if (!ownsHandoff()) throw new Error(detail);
+    // Permit only this claimed startup send. Keep the schedule on its source
+    // until LOGIC_ROLLOVER_COMPLETE verifies the delivered continuation.
+    const receipt = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_CHECK", requestId: handoff.failureId });
+    if (!receipt?.ok) throw new Error(receipt?.error || "The handoff was cancelled or expired. No continuation was sent.");
+    if (!ownsHandoff()) throw new Error(detail);
+  }
+
   function configureHeartbeat(schedule) {
     heartbeatSchedule = schedule;
     heartbeatFingerprint = "";
@@ -1703,7 +1730,7 @@ ${LOGIC_START_PROMPT}
       false,
       buildRolloverPrompt(previousTitle, pending.sourceUrl),
       `Sending the continuation and Logic Mode instructions for “${previousTitle}”…`,
-      { previousTitle, failureId: pending.requestId, projectSegment: pending.projectSegment }
+      { previousTitle, failureId: pending.requestId, projectSegment: pending.projectSegment, sourceUrl: pending.sourceUrl }
     );
   }
 
@@ -2895,12 +2922,13 @@ ${LOGIC_START_PROMPT}
     readyTimeoutMs = Infinity,
     sendGuard = null,
     includeQueuedPrompt = false,
-    requireServerEvent = false
+    requireServerEvent = false,
+    heartbeatHandoff = null
   ) {
     const composer = await waitForReady(runId, readyTimeoutMs);
     if (!composer || !state.running || state.runId !== runId) return false;
     if (!await waitForLogicResume(runId)) return false;
-    if (heartbeatSchedule?.enabled && !heartbeatMatchesLocation()) throw new Error("This tab left the scheduled conversation. Automatic sending stopped.");
+    await assertHeartbeatSendLocation(runId, heartbeatHandoff, "This tab left the scheduled conversation. Automatic sending stopped.");
     if (beforeWrite && !beforeWrite(composer)) return false;
     const addition = includeQueuedPrompt ? queuedPromptForLocation() : null;
     if (addition && queuedPromptInFlight) throw new Error("A queued prompt is already being prepared.");
@@ -2990,7 +3018,7 @@ ${LOGIC_START_PROMPT}
       }
 
       if (!await waitForLogicResume(runId)) return false;
-      if (heartbeatSchedule?.enabled && !heartbeatMatchesLocation()) throw new Error("This tab left the scheduled conversation before the message could be sent.");
+      await assertHeartbeatSendLocation(runId, heartbeatHandoff, "This tab left the scheduled conversation before the message could be sent.");
       if (sendGuard && !await sendGuard(composer, text.trim())) return false;
       if (!state.running || state.runId !== runId) return false;
       sendButton = findSendButton();
@@ -3478,7 +3506,8 @@ ${LOGIC_START_PROMPT}
             return ensureHighThinking(runId, composer, draft, rolloverUrl, startupFailureContext.projectSegment);
           } : null,
           true,
-          requireServerEvent
+          requireServerEvent,
+          startupFailureContext
         );
         if (!started || state.runId !== runId) {
           if (requireServerEvent && state.runId === runId && state.running) {

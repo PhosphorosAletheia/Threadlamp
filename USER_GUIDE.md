@@ -111,6 +111,10 @@ Prior conversation turns retained in hidden page sections do not block a new
 project landing page. A saved conversation containing history still cannot be
 used as a handoff destination, even when that history is hidden.
 
+An enabled heartbeat schedule stays attached to the source conversation while the
+verified continuation is prepared and sent. It moves to the destination only after
+the continuation is observed there. Ordinary navigation does not authorize a send.
+
 A successful handoff means the continuation message was observed in the new chat;
 it does not verify that the model recovered all prior context. Review the first
 response. Threadlamp does not extend the model context or reset an
