@@ -21,6 +21,23 @@ function destination(timing, captureRun = true) {
   return Object.assign(h, { composer, runs, pending });
 }
 
+function retainedHistory(h) {
+  const hidden = visibleElement();
+  hidden.display = "none";
+  const wrapper = Object.assign(visibleElement(), { parentElement: hidden, display: "contents" });
+  h.window.getComputedStyle = node => ({ visibility: "visible", display: node.display || "block" });
+  const message = text => Object.assign(visibleElement(text), {
+    parentElement: wrapper, children: [], matches: selector => selector === ".markdown"
+  });
+  const users = Array.from({length: 5}, () => message("Continue"));
+  const assistants = [message("Old response [[LOGIC:CONTINUE]]")];
+  const userSelector = "[data-message-author-role='user'],[data-user-message-bubble='true']";
+  const assistantSelector = "[data-message-author-role='assistant'],[data-conversation-role='assistant']";
+  h.setSelector(userSelector, users);
+  h.setSelector(assistantSelector, assistants);
+  return { hidden, wrapper, users, assistants, userSelector, assistantSelector, message };
+}
+
 (async () => {
   const helper = contentHarness().api;
   const oldHandoff = helper.buildRolloverPrompt("Different agent")
@@ -73,6 +90,56 @@ function destination(timing, captureRun = true) {
     h.window.location = new URL("https://chatgpt.com/");
     assert.match(h.api.rolloverReadinessIssue(sourcePath, project, true), /project ID/);
   }
+  // Reproduce a project landing page retaining five prior user turns in a
+  // display:none route subtree while its new composer is ready.
+  {
+    const h = destination(), history = retainedHistory(h);
+    h.composer.textContent = "";
+    assert.equal(h.api.messageElements("user").length, 0);
+    assert.equal(h.api.messageElements("user", true).length, 5);
+    assert.equal(h.api.rolloverDestinationHasMessages(), false);
+    assert.equal(h.api.rolloverReadinessIssue(new URL(sourceUrl).pathname, project, true), "");
+    await h.api.startClaimedLogicRollover({ ...h.pending, sourceUrl });
+    assert.equal(h.runs.length, 1, "hidden retained history must not block a project-home handoff");
+    h.window.location = new URL(sourceUrl + "-another-saved-chat");
+    assert.equal(h.api.rolloverDestinationHasMessages(), true, "hidden history still blocks a saved destination");
+    await assert.rejects(h.api.startClaimedLogicRollover({ ...h.pending, sourceUrl }), /could not be verified/);
+    h.window.location = new URL(`https://chatgpt.com/g/${project}`);
+    history.hidden.display = "block";
+    assert.equal(h.api.messageElements("user").length, 5);
+    assert.equal(h.api.rolloverDestinationHasMessages(), true, "real visible history must block handoff");
+    for (const element of history.users) element.getBoundingClientRect = () => ({width:0,height:0});
+    assert.equal(h.api.rolloverDestinationHasMessages(), true, "zero-sized or offscreen turns are not inactive routes");
+    history.hidden.display = "contents";
+    assert.equal(h.api.messageElements("user").length, 5, "display:contents is not a hidden route");
+  }
+  {
+    const h = destination(), history = retainedHistory(h);
+    const active = history.message("Current user turn"); active.parentElement = null;
+    h.setSelector(history.userSelector, [active, ...history.users]);
+    assert.equal(h.api.messageElements("user").length, 1);
+    assert.equal(h.api.messageElements("user")[0], active, "hidden old turns cannot become the latest user");
+    h.setSelector(history.userSelector, history.users);
+    h.setSelector("[data-turn='user']", [active]);
+    assert.equal(h.api.messageElements("user")[0], active, "inactive modern markup cannot hide active fallback turns");
+  }
+  {
+    const h = destination(), history = retainedHistory(h);
+    const parent = history.message("Visible assistant response"); parent.parentElement = null;
+    const heading = Object.assign(visibleElement("Assistant"), {tagName:"H6", parentElement: parent,
+      matches: selector => selector === "[data-conversation-role='assistant']",
+      getBoundingClientRect: () => ({width:1,height:1})});
+    h.setSelector(history.assistantSelector, [heading, ...history.assistants]);
+    assert.equal(h.api.messageElements("assistant")[0], parent, "screen-reader labels retain their active response parent");
+  }
+  {
+    const h = destination(), history = retainedHistory(h);
+    h.composer.textContent = oldHandoff;
+    h.setRequestHandler(async () => { history.hidden.display = "block"; return {ok:true}; });
+    await assert.rejects(h.api.startClaimedLogicRollover({ ...h.pending, requestId:"receipt", sourceUrl }), /draft changed/);
+    assert.equal(h.composer.textContent, oldHandoff, "history becoming active during verification preserves the draft");
+    assert.equal(h.runs.length, 0);
+  }
   const fingerprint = await helper.rolloverDraftFingerprint(submitted);
   assert.equal(fingerprint.length, submitted.length);
   assert.match(fingerprint.sha256, /^[a-f0-9]{64}$/);
@@ -94,6 +161,7 @@ function destination(timing, captureRun = true) {
   // The duplicate is only cleared. The real send path must write and send the
   // extension's title-based continuation protocol, never replay the duplicate.
   const actual = destination(undefined, false);
+  retainedHistory(actual);
   actual.composer.textContent = oldHandoff;
   const form = visibleElement();
   const high = visibleElement("High", { "aria-label": "Select ChatGPT model", "aria-haspopup": "menu", "aria-expanded": "false" });

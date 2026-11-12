@@ -131,7 +131,19 @@
       .trim();
   }
 
-  function messageElements(role) {
+  function messageElements(role, includeInactive = false) {
+    // ChatGPT retains prior routes in display:none subtrees after navigation.
+    // Read the active route, without dropping offscreen/virtualized turns or
+    // screen-reader headings just because they have a small or empty rectangle.
+    const activeCache = new Map();
+    const active = node => {
+      if (!node) return true;
+      if (activeCache.has(node)) return activeCache.get(node);
+      const result = window.getComputedStyle(node).display !== "none" && active(node.parentElement);
+      activeCache.set(node, result);
+      return result;
+    };
+    const retained = nodes => includeInactive ? nodes : nodes.filter(active);
     const roleSelectors = role === "assistant"
       ? [
           "[data-message-author-role='assistant']",
@@ -146,7 +158,7 @@
       .filter((node) => !node.parentElement?.closest(roleSelector));
 
     if (roleNodes.length) {
-      return [...new Set(roleNodes.map((node) => {
+      const messages = retained([...new Set(roleNodes.map((node) => {
         const isAssistantAccessibilityLabel = role === "assistant"
           && node.matches("[data-conversation-role='assistant']")
           && /^H[1-6]$/.test(node.tagName);
@@ -157,7 +169,8 @@
         return isAssistantAccessibilityLabel && node.parentElement
           ? node.parentElement
           : node;
-      }))];
+      }))]);
+      if (messages.length) return messages;
     }
 
     // Older ChatGPT versions used article/section conversation-turn wrappers.
@@ -168,11 +181,10 @@
       `[data-testid='${role}-turn']`
     ];
 
-    return [...new Set(turnSelectors.flatMap((selector) => [
+    return retained([...new Set(turnSelectors.flatMap((selector) => [
       ...document.querySelectorAll(selector)
-    ]))];
+    ]))]);
   }
-
 
   function inspectText(value) {
     const text = String(value || "");

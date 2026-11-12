@@ -107,6 +107,9 @@ clears it and writes a fresh continuation for the verified source conversation.
 Edited handoff text and unrelated drafts are preserved. The receipt, destination,
 and editor are checked again before clearing and sending. If the destination
 does not become ready, the stopped notice identifies the check that failed.
+Prior conversation turns retained in hidden page sections do not block a new
+project landing page. A saved conversation containing history still cannot be
+used as a handoff destination, even when that history is hidden.
 
 A successful handoff means the continuation message was observed in the new chat;
 it does not verify that the model recovered all prior context. Review the first

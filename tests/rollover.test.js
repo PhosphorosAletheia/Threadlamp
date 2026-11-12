@@ -83,6 +83,8 @@ function exposeContentFunctions(source) {
       classifyRolloverDraft,
       isGeneratedRolloverDraft,
       rolloverReadinessIssue,
+      rolloverDestinationHasMessages,
+      messageElements,
       rolloverDraftFingerprint,
       matchesSubmittedRolloverDraft,
       beginProjectRollover,

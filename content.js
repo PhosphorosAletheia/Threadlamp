@@ -580,12 +580,21 @@ ${LOGIC_START_PROMPT}
     if (window.location.pathname === sourcePath) return "the page did not leave the original conversation";
     if (hasMaximumLengthNotice()) return "the conversation-limit notice is still present";
     if (!findComposer()) return "the destination message editor was not found";
-    if (latestMessageSnapshot("user").element || latestMessageSnapshot("assistant").element) {
+    if (rolloverDestinationHasMessages()) {
       return "conversation messages are still present in the destination page";
     }
     if (isGenerating()) return "the destination is already generating a response";
     if (needsProjectHome && !projectHomeReady()) return "the destination is not a ready project landing page";
     return "";
+  }
+
+  function rolloverDestinationHasMessages() {
+    if (latestMessageSnapshot("user").element || latestMessageSnapshot("assistant").element) return true;
+    // Only a verified project landing route may disregard retained hidden
+    // history. A saved conversation must still fail closed while its messages
+    // are hidden or loading, even if its editor is already visible.
+    const projectHome = /^\/g\/g-p-[a-f0-9]{32}(?:-[^/]+)?(?:\/project)?\/?$/i.test(window.location.pathname);
+    return !projectHome && (messageElements("user", true).length > 0 || messageElements("assistant", true).length > 0);
   }
 
   // Rich-text composers and rendered messages can use different runs of ordinary
@@ -728,7 +737,19 @@ ${LOGIC_START_PROMPT}
       .trim();
   }
 
-  function messageElements(role) {
+  function messageElements(role, includeInactive = false) {
+    // ChatGPT retains prior routes in display:none subtrees after navigation.
+    // Read the active route, without dropping offscreen/virtualized turns or
+    // screen-reader headings just because they have a small or empty rectangle.
+    const activeCache = new Map();
+    const active = node => {
+      if (!node) return true;
+      if (activeCache.has(node)) return activeCache.get(node);
+      const result = window.getComputedStyle(node).display !== "none" && active(node.parentElement);
+      activeCache.set(node, result);
+      return result;
+    };
+    const retained = nodes => includeInactive ? nodes : nodes.filter(active);
     const roleSelectors = role === "assistant"
       ? [
           "[data-message-author-role='assistant']",
@@ -743,7 +764,7 @@ ${LOGIC_START_PROMPT}
       .filter((node) => !node.parentElement?.closest(roleSelector));
 
     if (roleNodes.length) {
-      return [...new Set(roleNodes.map((node) => {
+      const messages = retained([...new Set(roleNodes.map((node) => {
         const isAssistantAccessibilityLabel = role === "assistant"
           && node.matches("[data-conversation-role='assistant']")
           && /^H[1-6]$/.test(node.tagName);
@@ -754,7 +775,8 @@ ${LOGIC_START_PROMPT}
         return isAssistantAccessibilityLabel && node.parentElement
           ? node.parentElement
           : node;
-      }))];
+      }))]);
+      if (messages.length) return messages;
     }
 
     // Older ChatGPT versions used article/section conversation-turn wrappers.
@@ -765,9 +787,9 @@ ${LOGIC_START_PROMPT}
       `[data-testid='${role}-turn']`
     ];
 
-    return [...new Set(turnSelectors.flatMap((selector) => [
+    return retained([...new Set(turnSelectors.flatMap((selector) => [
       ...document.querySelectorAll(selector)
-    ]))];
+    ]))]);
   }
 
   function latestMessageSnapshot(role) {
@@ -1605,7 +1627,7 @@ ${LOGIC_START_PROMPT}
 
     if (
       !destinationMatchesProject(pending?.projectSegment)
-      || latestMessageSnapshot("user").element || latestMessageSnapshot("assistant").element
+      || rolloverDestinationHasMessages()
       || (pending?.projectHomeUrl && !projectHomeReady())
       || !previousTitle
       || !message
@@ -1646,7 +1668,7 @@ ${LOGIC_START_PROMPT}
     }
     if (state.runId !== entryRunId) return false;
     if (window.location.href !== destinationUrl || !destinationMatchesProject(pending?.projectSegment)
-      || latestMessageSnapshot("user").element || latestMessageSnapshot("assistant").element || isGenerating()
+      || rolloverDestinationHasMessages() || isGenerating()
       || findComposer() !== composer || composerText(composer) !== carriedDraft) {
       throw new Error("The new chat or its draft changed while verifying the handoff. The draft was preserved.");
     }
@@ -1699,7 +1721,7 @@ ${LOGIC_START_PROMPT}
       }
 
       if (state.running || hasMaximumLengthNotice() || !findComposer() || !projectSegment
-        || latestMessageSnapshot("user").element || latestMessageSnapshot("assistant").element) {
+        || rolloverDestinationHasMessages()) {
         return;
       }
 

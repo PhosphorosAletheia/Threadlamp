@@ -36,6 +36,7 @@ function inspect(raw, visible = raw, selectedRoot = null) {
   const printed = [];
   const context = {
     URL,
+    window: { getComputedStyle: () => ({display: "block"}) },
     console: { log: value => printed.push(value) },
     document: { querySelectorAll: selector => selector === primary ? [node] : [] }
   };

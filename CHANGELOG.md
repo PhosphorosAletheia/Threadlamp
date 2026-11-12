@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.12 beta 1
+
+- Ignore prior conversation turns retained inside hidden page subtrees when
+  reading the active chat or preparing a handoff on a project landing page.
+- Continue to reject saved handoff destinations containing hidden history.
+- Keep offscreen turns and accessible response labels eligible for message
+  detection; a zero-sized element alone does not mean the conversation is empty.
+
 ## 1.9.11 beta 1
 
 - Replace a complete restored Threadlamp handoff draft with a fresh continuation
