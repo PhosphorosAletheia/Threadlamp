@@ -193,7 +193,7 @@
   }
   async function handle(request, sender) {
     if (request.type === "DB_RECORD") {
-      if (!isTrustedChatSender(sender) || sender.frameId !== 0 || !request.snapshot?.instanceId
+      if (!(await isTrustedChatSender(sender)) || sender.frameId !== 0 || !request.snapshot?.instanceId
         || cleanUrl(sender.tab.url) !== request.snapshot.url) throw new Error("Untrusted agent status.");
       await record(request.snapshot, sender.tab);
       return { ok: true };

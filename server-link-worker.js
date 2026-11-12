@@ -193,7 +193,7 @@
   }
   async function handle(request, sender) {
     const popup = isTrustedExtensionPage(sender);
-    const chat = isTrustedChatSender(sender) && (sender.frameId === undefined || sender.frameId === 0);
+    const chat = (await isTrustedChatSender(sender)) && (sender.frameId === undefined || sender.frameId === 0);
     if (!popup && !chat) throw new Error("Untrusted server connection request.");
     const tab = popup ? await chrome.tabs.get(request.tabId) : sender.tab;
     const project = ServerLink.projectId(tab.url);

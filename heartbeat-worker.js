@@ -163,7 +163,7 @@
   }
   async function handle(request, sender) {
     const fromPopup = isTrustedExtensionPage(sender);
-    const fromChat = isTrustedChatSender(sender) && (sender.frameId === undefined || sender.frameId === 0);
+    const fromChat = (await isTrustedChatSender(sender)) && (sender.frameId === undefined || sender.frameId === 0);
     if (!fromPopup && !fromChat) throw new Error("Untrusted heartbeat request.");
     const records = await read();
     if (fromPopup) {

@@ -67,6 +67,38 @@ const { harness, sourceUrl, definition } = require("./heartbeat.test.js");
 
   const heartbeat = await harness();
   await heartbeat.dispatch({ type: "HB_SAVE", tabId: 17, configuration: definition });
+  // A changed sender URL is accepted only with browser evidence for this exact
+  // active top-frame document and a still-matching live tab route.
+  const navigationSender = { id: "test-extension", frameId: 0, documentId: "document-A", documentLifecycle: "active",
+    url: sourceUrl + "-old-route", tab: { ...heartbeat.tabs.get(17) } };
+  let documentResult = { documentId: "document-A", frameId: 0, result: { url: sourceUrl, top: true } };
+  heartbeat.context.chrome.scripting = { executeScript: async options => {
+    assert.equal(options.target.tabId, 17);
+    assert.equal(options.target.documentIds[0], "document-A");
+    return [documentResult];
+  } };
+  assert.equal(await heartbeat.context.isTrustedChatSender(navigationSender), true);
+  const savedResult = documentResult;
+  for (const invalid of [
+    { ...savedResult, documentId: "old-document" }, { ...savedResult, frameId: 1 },
+    { ...savedResult, result: { url: sourceUrl, top: false } },
+    { ...savedResult, result: { url: sourceUrl + "-wrong-chat", top: true } },
+    { ...savedResult, result: { url: sourceUrl.replace("chatgpt.com", "evil.example"), top: true } }
+  ]) {
+    documentResult = invalid;
+    assert.equal(await heartbeat.context.isTrustedChatSender(navigationSender), false);
+  }
+  documentResult = savedResult;
+  for (const invalid of [
+    { ...navigationSender, documentId: undefined }, { ...navigationSender, frameId: 1 },
+    { ...navigationSender, documentLifecycle: "cached" }, { ...navigationSender, id: "another-extension" },
+    { ...navigationSender, url: sourceUrl.replace("chatgpt.com", "evil.example") }
+  ]) assert.equal(await heartbeat.context.isTrustedChatSender(invalid), false);
+  heartbeat.tabs.set(17, { id: 17, url: sourceUrl + "-changed-during-check" });
+  assert.equal(await heartbeat.context.isTrustedChatSender(navigationSender), false);
+  heartbeat.tabs.set(17, { ...navigationSender.tab });
+  heartbeat.context.chrome.scripting.executeScript = async () => { throw new Error("Document no longer exists"); };
+  assert.equal(await heartbeat.context.isTrustedChatSender(navigationSender), false);
   const original = heartbeat.record().id;
   const renamed = sourceUrl.replace("job-search", "new-name");
   heartbeat.tabs.set(17, { id: 17, url: renamed, title: "Renamed project" });

@@ -186,16 +186,33 @@ function isTrustedExtensionPage(sender) {
   }
 }
 
-function isTrustedChatSender(sender) {
-  return Boolean(
-    sender?.id === chrome.runtime.id
-    && Number.isInteger(sender.tab?.id)
-    && isChatGptUrl(sender.tab.url)
-    && (sender.frameId === undefined || sender.frameId === 0)
-    && (!sender.url || (isChatGptUrl(sender.url)
-      && new URL(sender.url).origin === new URL(sender.tab.url).origin
-      && chatPathFromUrl(sender.url) === chatPathFromUrl(sender.tab.url)))
-  );
+async function isTrustedChatSender(sender) {
+  if (!(sender?.id === chrome.runtime.id
+    && Number.isInteger(sender.tab?.id) && isChatGptUrl(sender.tab.url)
+    && (sender.frameId === undefined || sender.frameId === 0))) return false;
+  if (!sender.url) return true;
+  if (!isChatGptUrl(sender.url)
+    || new URL(sender.url).origin !== new URL(sender.tab.url).origin) return false;
+  if (chatPathFromUrl(sender.url) === chatPathFromUrl(sender.tab.url)) return true;
+
+  // A same-document navigation can leave sender.url describing the old route.
+  // Verify the exact browser-issued document, never authorize from a name or
+  // an origin match alone. No page content or draft is read here.
+  if (sender.frameId !== 0 || typeof sender.documentId !== "string" || !sender.documentId
+    || (sender.documentLifecycle && sender.documentLifecycle !== "active")) return false;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: sender.tab.id, documentIds: [sender.documentId] },
+      func: () => ({ url: location.href, top: window === window.top })
+    });
+    const result = results?.length === 1 ? results[0] : null;
+    const tab = await chrome.tabs.get(sender.tab.id);
+    const matches = url => isChatGptUrl(url)
+      && new URL(url).origin === new URL(sender.tab.url).origin
+      && chatPathFromUrl(url) === chatPathFromUrl(sender.tab.url);
+    return Boolean(result?.documentId === sender.documentId && result.frameId === 0
+      && result.result?.top === true && matches(result.result.url) && matches(tab.url));
+  } catch { return false; }
 }
 
 function publicSettings() {
@@ -1271,28 +1288,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return playWorkstationAlert(true);
 
       case "ALERT_PLAY_USER_INPUT":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted alert request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted alert request.");
         return playWorkstationAlert();
 
       case "ALERT_PLAY_ROLLOVER_FAILURE":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted alert request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted alert request.");
         return playWorkstationAlert();
 
       case "LOGIC_ROLLOVER_PREPARE":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
         return prepareLogicRollover(request, sender);
 
       case "LOGIC_ROLLOVER_CLAIM":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
         return claimLogicRollover(request, sender);
 
       case "LOGIC_ROLLOVER_CHECK":
       case "LOGIC_ROLLOVER_COMPLETE":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
         return completeLogicRollover(request, sender);
 
       case "LOGIC_ROLLOVER_CANCEL":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
         return cancelLogicRollover(request, sender);
 
       case "HA_SAVE_SETTINGS":
@@ -1312,25 +1329,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return sendTestNotification();
 
       case "HA_NOTIFY_USER_INPUT":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted notification request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted notification request.");
         if (typeof DashboardWorker !== "undefined") void DashboardWorker.notification(request, sender.tab).catch(console.warn);
         if (!config.enabled) return { ok: true, enabled: false };
         return sendUserInputNotification(request, sender);
 
       case "HA_NOTIFY_ROLLOVER_FAILURE":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted notification request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted notification request.");
         if (typeof DashboardWorker !== "undefined") void DashboardWorker.notification(request, sender.tab).catch(console.warn);
         if (!config.enabled) return { ok: true, enabled: false };
         return sendRolloverFailureNotification(request, sender);
 
       case "HA_NOTIFY_ERROR":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted notification request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted notification request.");
         if (typeof DashboardWorker !== "undefined") void DashboardWorker.notification(request, sender.tab).catch(console.warn);
         if (!config.enabled) return { ok: true, enabled: false };
         return sendErrorNotification(request, sender);
 
       case "HA_CANCEL_REQUEST":
-        if (!isTrustedChatSender(sender)) throw new Error("Untrusted cancellation request.");
+        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted cancellation request.");
         return cancelPendingRequest(request, sender);
 
       default:

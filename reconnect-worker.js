@@ -18,10 +18,10 @@
   }
   async function handle(request, sender) {
     await initializationPromise;
-    if (!isTrustedChatSender(sender) || sender.frameId !== 0 || !id(request.instanceId)) throw new Error("Untrusted reconnection request.");
+    if (!(await isTrustedChatSender(sender)) || sender.frameId !== 0 || !id(request.instanceId)) throw new Error("Untrusted reconnection request.");
     const tab = await chrome.tabs.get(sender.tab.id);
     const url = Heartbeat.canonicalUrl(tab.url);
-    if (!url || url !== Heartbeat.canonicalUrl(sender.url || sender.tab.url)
+    if (!url || url !== Heartbeat.canonicalUrl(sender.tab.url)
       || url !== Heartbeat.canonicalUrl(request.url)) throw new Error("The reconnection target changed.");
     const records = (await chrome.storage.session.get(KEY))[KEY] || {};
     for (const [key, record] of Object.entries(records)) if (Date.now() - record.at > TTL) delete records[key];
