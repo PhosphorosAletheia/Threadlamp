@@ -21,6 +21,7 @@ function exposeContentFunctions(source) {
     Object.assign(globalThis.__test, {
       state,
       dashboardSnapshot,
+      publishOutputSummary,
       executeDashboardCommand,
       publishDashboardStatus,
       startServerSetup,

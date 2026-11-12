@@ -8,7 +8,7 @@ SPDX-License-Identifier: MPL-2.0 -->
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Home Assistant Settings · Threadlamp</title>
+    <title>Settings · Threadlamp</title>
     <link rel="stylesheet" href="options.css">
     <link rel="stylesheet" href="brand.css">
 </head>
@@ -18,11 +18,27 @@ SPDX-License-Identifier: MPL-2.0 -->
         <div class="mark" aria-hidden="true">↻</div>
         <div>
           <p class="eyebrow">Threadlamp · Phosphoros Research</p>
-          <h1>Home Assistant settings</h1>
-          <p class="intro">This page stays open while you switch tabs or windows to collect your Home Assistant information.</p>
+          <h1>Threadlamp settings</h1>
+          <p class="intro">Configure optional dashboard summaries and Home Assistant notifications.</p>
         </div>
         <span id="ha-badge" class="badge">Not configured</span>
       </header>
+
+      <section class="card" aria-labelledby="summary-heading">
+        <h2 id="summary-heading">Last output summaries</h2>
+        <p>Send each completed Logic Mode response to OpenRouter and its selected free-model provider for a short dashboard summary. Uses <strong>openrouter/free</strong>.</p>
+        <form id="summary-controls">
+          <label class="check-row" for="summary-enabled"><input id="summary-enabled" type="checkbox"><span>Enable summaries</span></label>
+          <div class="field">
+            <label for="summary-key">OpenRouter API key</label>
+            <input id="summary-key" type="password" autocomplete="new-password" maxlength="512" placeholder="Enter API key locally">
+            <small id="summary-key-state">No API key saved.</small>
+          </div>
+          <p>The key is stored in this Chrome profile and excluded from settings backups. Only the current response is sent when enabled; provider data policies apply. Free-model availability and rate limits may delay or prevent summaries.</p>
+          <div class="primary-actions"><button type="submit" class="primary">Save summary settings</button><button id="summary-forget" type="button" class="secondary">Forget API key</button><button id="summary-clear" type="button" class="secondary">Clear saved summaries</button></div>
+          <p id="summary-status" role="status">Loading summary settings…</p>
+        </form>
+      </section>
 
       <section class="card">
         <form id="ha-controls">
@@ -133,5 +149,6 @@ SPDX-License-Identifier: MPL-2.0 -->
     </main>
     <script src="settings-backup.js"></script>
     <script src="options.js"></script>
+    <script src="summary-options.js"></script>
   </body>
 </html>

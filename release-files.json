@@ -48,6 +48,8 @@
     "server-link.js",
     "service-worker.js",
     "settings-backup.js",
+    "summary-options.js",
+    "summary-worker.js",
     "tests/automatic-heartbeat.test.js",
     "tests/chat-ownership.test.js",
     "tests/dashboard-ui.fixture.js",
@@ -71,6 +73,7 @@
     "tests/server-ready-diagnostic.test.js",
     "tests/server-user-input.test.js",
     "tests/settings-backup.test.js",
+    "tests/summary.test.js",
     "tests/thinking-discovery-diagnostic.test.js",
     "tests/thinking.test.js"
   ],
@@ -110,6 +113,8 @@
     "server-link-worker.js",
     "server-link.js",
     "service-worker.js",
-    "settings-backup.js"
+    "settings-backup.js",
+    "summary-options.js",
+    "summary-worker.js"
   ]
 }

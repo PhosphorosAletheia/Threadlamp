@@ -132,11 +132,12 @@
       }
     }));
     const data = await history(data => ({ agents: data.agents, events: data.events, projectTitles: data.projectTitles }));
+    const summaries = globalThis.SummaryWorker ? await SummaryWorker.list() : {};
     const current = new Set(agents.map(a => `${a.tabId}:${a.instanceId}:${a.url}`));
     const offline = Object.values(data.agents).filter(a => !current.has(a.key)
       && !agents.some(live => live.tabId === a.tabId && live.url === a.url));
     return { ok: true, agents: [...agents, ...offline.map(a => ({ ...a, online: false, detail: "Previously seen agent. Its page is no longer connected." }))]
-      .map(agent => ({ ...agent, ...labels(data, agent) })),
+      .map(agent => ({ ...agent, ...labels(data, agent), summary: summaries[agent.url] || null })),
       events: data.events.map(event => {
         const agent = data.agents[event.agentKey];
         return { ...event, title: labels(data, { ...event, url: event.url || agent?.url,

@@ -65,7 +65,7 @@
     $("agent-list-count").textContent = agents.filter(matches).length;
     for (const button of document.querySelectorAll("[data-filter]")) button.setAttribute("aria-pressed", String(button.dataset.filter === $("filter").value));
     const fingerprint = JSON.stringify([selectedKey, busy, $("search").value, $("filter").value,
-      agents.map(a => [key(a), a.title, a.chatTitle, a.detail, a.online, a.mode, a.logicPhase, a.error, a.paused, a.running, a.count, a.limit])]);
+      agents.map(a => [key(a), a.title, a.chatTitle, a.detail, a.online, a.mode, a.logicPhase, a.error, a.paused, a.running, a.count, a.limit, a.summary])]);
     if (cardsFingerprint === fingerprint) return;
     cardsFingerprint = fingerprint;
     const focusedKey = document.activeElement?.closest(".agent-select")?.dataset.agentKey;
@@ -81,6 +81,7 @@
       const description = el("p", agent.chatTitle && agent.chatTitle !== agent.title ? agent.chatTitle : agent.detail || "Ready.");
       description.title = agent.detail || description.textContent;
       choose.append(heading, description);
+      if (agent.summary?.last?.text) choose.append(el("p", agent.summary.last.text, "summary-preview"));
       const bottom = el("div", undefined, "card-bottom");
       bottom.append(el("span", phase(agent), badge(agent)), el("span", agent.online ? `${agent.count || 0} / ${agent.limit || 0}` : "Unavailable"));
       choose.append(bottom); choose.addEventListener("click", () => selectAgent(agent)); card.append(choose);
@@ -140,6 +141,12 @@
     $("agent-phase").textContent = phase(agent); $("agent-phase").className = `pill ${badge(agent)}`;
     $("agent-count").textContent = `${agent.count || 0} / ${agent.limit || 0} messages`;
     $("agent-detail").textContent = agent.detail || "Ready.";
+    const summary = agent.summary, last = summary?.last;
+    $("agent-summary").textContent = last?.text || "No summary yet. Enable summaries in Settings.";
+    $("agent-summary-meta").textContent = last ? `Completed ${time(last.completedAt)} · ${last.model}${last.flag ? ` · ${last.flag.toUpperCase()}` : ""}` : "";
+    $("agent-summary-status").textContent = summary?.status === "pending"
+      ? "Summarizing latest output…" + (last ? " Previous summary shown above." : "")
+      : summary?.status === "error" ? summary.error + (last ? " Previous summary shown above." : "") : "";
     $("agent-timing").textContent = agent.waitUntil ? `Status check at ${time(agent.waitUntil)} · ${Math.max(0, Math.ceil((agent.waitUntil - Date.now()) / 1000))}s remaining`
       : agent.heartbeat?.nextRunAt ? `Next heartbeat: ${time(agent.heartbeat.nextRunAt)}` : agent.lastSeen ? `Updated ${new Date(agent.lastSeen).toLocaleTimeString()}` : "";
     $("agent-guard").textContent = !agent.online ? "Controls are disabled until this page connects."

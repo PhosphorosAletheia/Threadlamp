@@ -24,12 +24,15 @@ function mock() {
     { ...base, tabId: 19, instanceId: "schedule", title: "Daily Operations", chatTitle: "Scheduled system checks", url: "https://chatgpt.com/c/checks", detail: "Work cycle complete. Sleeping until the next heartbeat.", logicPhase: "sleeping", count: 0, heartbeat: { nextRunAt: Date.now() + 1800000 } },
     { ...base, online: false, tabId: 20, instanceId: "offline", title: "Previous Research", chatTitle: "Archived source review", url: "https://chatgpt.com/c/archive", detail: "Previously seen agent. Its page is no longer connected." }
   ];
+  agents[0].summary = { status: "ready", last: { text: "Reviewed three competitors and compared their published features. Pricing still needs verification.", completedAt: Date.now() - 60000, model: "example/free", flag: "continue" } };
+  agents[1].summary = { status: "error", error: "OpenRouter free-model rate limit reached.", last: { text: "Built the dashboard controls and requested the next milestone.", completedAt: Date.now() - 120000, model: "example/free", flag: "user_input" } };
+  agents[2].summary = { status: "pending", last: null };
   const events = [{ id: "event-1", at: Date.now(), agentKey: `18:build:${agents[1].url}`, tabId: 18, title: agents[1].title, kind: "input", detail: agents[1].detail },
     { id: "event-2", at: Date.now() - 120000, agentKey: `19:schedule:${agents[2].url}`, tabId: 19, title: agents[2].title, kind: "status", detail: agents[2].detail }];
   const configuration = { kind: "interval", intervalMinutes: 60, times: [], days: [], timeZone: "America/Chicago", prompt: "Check the next scheduled tasks.", limit: 5, phase: "sleeping", detail: "Waiting for next cycle." };
   globalThis.chrome = {
     runtime: { openOptionsPage: async () => {}, sendMessage: async request => {
-      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.9.7" });
+      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.10.0" });
       if (request.type === "DB_INSPECT") return { ok: true, schedule: configuration, connection: null, defaultPrompt: "Do the scheduled work." };
       if (request.type === "ALERT_GET_SETTINGS") return { soundEnabled: true };
       if (request.type === "HA_GET_SETTINGS") return { enabled: true, connection: { phase: "connected" }, approvalMessage: "Approved. Continue with the current task." };
@@ -83,6 +86,8 @@ function mock() {
       assert(actions.length === 0, "Opening the dashboard never runs commands");
       assert(!$("activity-drawer").open, "Activity stays out of the workspace until requested");
       await select(17);
+      assert($("agent-summary").textContent.includes("Reviewed three competitors"), "Selected agent displays its last output summary");
+      assert($("agent-summary-meta").textContent.includes("CONTINUE"), "Summary includes ending Logic tag");
       assert($("agent-title").textContent === agents[0].title, "Project selection");
       assert($("chat-title").textContent === agents[0].chatTitle, "Chat is secondary context");
       checkLayout();

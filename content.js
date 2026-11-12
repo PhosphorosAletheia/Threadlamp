@@ -3454,6 +3454,22 @@ ${LOGIC_START_PROMPT}
     }
   }
 
+  const summaryResponseIds = new WeakMap();
+  function publishOutputSummary(response, flag) {
+    // One stabilized assistant output only. Never traverse conversation history.
+    if (!["continue", "wait", "user_input", "idle", "invalid_wait"].includes(flag) || !response?.text) return;
+    try {
+      const element = response.element;
+      const identified = element?.getAttribute("data-message-id") ? element
+        : element?.closest("[data-message-id]") || element?.querySelector?.("[data-message-id]");
+      if (element && !summaryResponseIds.has(element)) summaryResponseIds.set(element, crypto.randomUUID());
+      const completion = identified?.getAttribute("data-message-id") || summaryResponseIds.get(element)
+        || `${heartbeatInstanceId}:${state.runId}:${state.count}`;
+      void chrome.runtime.sendMessage({ type: "SUM_COMPLETE", url: window.location.href.split(/[?#]/)[0],
+        completion, output: response.text, flag }).catch(() => {});
+    } catch { /* Summary delivery must never interrupt Logic Mode. */ }
+  }
+
   async function runLogicMode(
     runId,
     resume = false,
@@ -3559,6 +3575,8 @@ ${LOGIC_START_PROMPT}
           flag,
           generatedImageFallback
         } = classifyLogicResponse(response);
+
+        publishOutputSummary(response, directive.flag);
 
         state.userInputBrief = flag === "user_input"
           ? parseLogicBrief(response.text)

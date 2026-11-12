@@ -248,3 +248,9 @@ dialog::backdrop { background: #00000099; backdrop-filter: blur(2px); }
   .actions { margin-top: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+.last-output { margin: 14px 24px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.last-output h3 { margin: 0 0 8px; font-size: 14px; }
+.last-output p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.last-output small { opacity: .75; }
+.agent-select .summary-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; font-size: 12px; }

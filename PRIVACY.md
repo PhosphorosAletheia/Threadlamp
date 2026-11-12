@@ -1,7 +1,7 @@
 # Threadlamp privacy notice
 
 Publisher: [Phosphoros Research](https://phosphoros-research.pages.dev/).
-Applies to Threadlamp 1.9.7 beta 1. Prepared November 9, 2026.
+Applies to Threadlamp 1.10.0 beta 1. Prepared November 12, 2026.
 
 ## Data handled
 
@@ -16,6 +16,7 @@ There is no extension-operated publisher telemetry, advertising or analytics ser
 | Chat URLs/titles, project labels, status and short input-request summaries | Used in the dashboard; bounded agent/event records are stored locally. |
 | Scheduled prompts, times, timezone and dispatch state | Stored locally for heartbeats across background-worker restarts. |
 | Pending prompt queues and drafts | Held in the tab; a pending rollover may temporarily carry queue data in extension session storage. |
+| OpenRouter API key and output summaries | If enabled, the key and up to 100 conversation records are stored locally in trusted extension storage. Each record retains the latest summary, model, ending tag, timestamps/status and up to 30 completion hashes. Raw outputs are held transiently for a request, not persisted. |
 | Home Assistant address, notification action and access token | Stored locally only if configured; used to contact that service. |
 | Project server bindings, credentials, setup state and event identifiers | Stored locally if configured; used for pairing and routed event delivery. |
 | Logic reconnection checkpoints | Tab/conversation identity, follow-up settings and count, and a hash of the last user message ID and text are held in extension session storage. No transcript is saved; up to 100 recent checkpoints are retained and expire for recovery after ten minutes without updates. |
@@ -31,6 +32,12 @@ these bounds are counts, not automatic time-based deletion periods.
 - **ChatGPT:** requested prompts, follow-ups, queued instructions, replies and
   setup messages are submitted through your signed-in ChatGPT page. OpenAI's
   applicable terms and privacy practices govern its processing.
+- **OpenRouter, if enabled:** the complete text of one finished Logic Mode assistant
+  response (through its ending tag) is sent to OpenRouter and a provider selected
+  by `openrouter/free`, along with summarization instructions. The API key is sent
+  to OpenRouter for authentication. Previous turns and user prompts are excluded.
+  OpenRouter and provider retention/training policies apply. This integration is
+  disabled by default and requires optional OpenRouter host access.
 - **Home Assistant, if enabled:** your configured instance receives authentication
   and notification requests containing chat links, titles, brief requests, status
   or errors. Its mobile notification delivery may involve push service providers.
@@ -57,7 +64,7 @@ profile or operating system may be able to read them. Protect your device.
 An optional downloaded settings backup is encrypted locally with AES-256-GCM and
 PBKDF2-SHA-256. It includes the Home Assistant access token. Your passphrase is not
 saved or sent; loss of it makes that backup unrecoverable. The backup omits several
-other data categories; see the user guide.
+other data categories, including the OpenRouter key and summaries; see the user guide.
 
 ## Permissions
 
@@ -69,13 +76,16 @@ other data categories; see the user guide.
 | `scripting` | Reattach bundled page scripts to an eligible active chat when needed. |
 | `alarms` | Schedule heartbeat wakeups. |
 | ChatGPT host access | Read page state and submit the requested chat controls. |
-| Optional HTTP/HTTPS hosts | Request user-selected Home Assistant site access or localhost access for project connections. The declaration permits configurable hosts; access is requested at setup. |
+| Optional HTTP/HTTPS hosts | Request user-selected Home Assistant site access localhost access for project connections, or OpenRouter access for output summaries. The declaration permits configurable hosts; access is requested at setup. |
 
 ## Control and deletion
 
 Pause/stop automation and disable schedules to prevent future automatic work.
 Clear dashboard event history through its UI. Use **Forget settings** for Home
-Assistant and remove project connections when no longer needed. Revoke credentials
+Assistant and remove project connections when no longer needed. Disable output
+summaries and use **Forget API key** or **Clear saved summaries** in Settings to
+remove OpenRouter configuration or results. Dashboard event clearing does not
+remove summary records. Revoke credentials
 at their originating services. Uninstall removes extension-managed local storage;
 delete downloaded backups and service-side messages/records separately.
 

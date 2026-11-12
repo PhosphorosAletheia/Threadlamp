@@ -50,7 +50,7 @@ SPDX-License-Identifier: MPL-2.0 -->
           <button id="tab-heartbeat" role="tab" aria-selected="false" aria-controls="panel-heartbeat" data-panel="heartbeat" tabindex="-1">Heartbeat</button>
           <button id="tab-server" role="tab" aria-selected="false" aria-controls="panel-server" data-panel="server" tabindex="-1">Server</button>
         </div>
-        <div class="panel-scroll">
+        <div class="panel-scroll"><section class="last-output" aria-labelledby="summary-title"><h3 id="summary-title">Last output summary</h3><p id="agent-summary">No summary yet. Enable summaries in Settings.</p><small id="agent-summary-meta"></small><p id="agent-summary-status" role="status"></p></section>
           <section id="panel-queue" role="tabpanel" aria-labelledby="tab-queue" tabindex="0" class="tool-panel">
             <div class="panel-heading"><div><h3>Guide the next round</h3><p class="muted">Add instructions while your agent keeps working.</p></div><span class="panel-symbol" aria-hidden="true">↳</span></div>
             <div class="context-strip"><span class="status-dot"></span><p id="queue-state">No instructions queued.</p></div>
@@ -85,7 +85,7 @@ SPDX-License-Identifier: MPL-2.0 -->
     <div class="activity-filters"><label class="sr-only" for="event-scope">Activity scope</label><select id="event-scope"><option value="all">All agents</option><option value="selected">Selected agent</option></select><label class="sr-only" for="event-kind">Activity type</label><select id="event-kind"><option value="all">All updates</option><option value="attention">Input &amp; errors</option></select></div>
     <div id="events" class="event-list"></div><div class="dialog-footer"><label class="check"><input id="show-dismissed" type="checkbox">Show dismissed</label><button id="clear-history" class="text-button">Clear history</button></div>
   </dialog>
-  <dialog id="preferences-dialog" class="preferences-dialog" aria-labelledby="preferences-title"><div class="dialog-header"><div><p class="eyebrow">PREFERENCES</p><h2 id="preferences-title">Workspace settings</h2></div><button data-close="preferences-dialog" class="icon-button" aria-label="Close settings">×</button></div><div class="preferences-body"><label class="check"><input id="sound" type="checkbox">Sound for input requests</label><button id="test-sound">Test sound</button><p id="ha-status" class="muted small"></p><div class="quick-tools"><h4>Extension settings</h4><p class="muted">Manage Home Assistant and encrypted backups.</p><button id="settings">Open settings &amp; backup ↗</button></div></div></dialog>
+  <dialog id="preferences-dialog" class="preferences-dialog" aria-labelledby="preferences-title"><div class="dialog-header"><div><p class="eyebrow">PREFERENCES</p><h2 id="preferences-title">Workspace settings</h2></div><button data-close="preferences-dialog" class="icon-button" aria-label="Close settings">×</button></div><div class="preferences-body"><label class="check"><input id="sound" type="checkbox">Sound for input requests</label><button id="test-sound">Test sound</button><p id="ha-status" class="muted small"></p><div class="quick-tools"><h4>Extension settings</h4><p class="muted">Manage OpenRouter summaries, Home Assistant, and encrypted backups.</p><button id="settings">Open settings &amp; backup ↗</button></div></div></dialog>
   <script src="heartbeat.js"></script><script src="dashboard.js"></script>
 </body>
 </html>

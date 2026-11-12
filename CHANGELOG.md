@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.0 beta 1
+
+- Add optional OpenRouter last-output summaries to agent cards and the dashboard.
+  Each request contains one completed assistant response, through its ending
+  Logic tag, rather than the conversation or multiple response cycles.
+- Use `openrouter/free` with local API-key settings and optional host access.
+- Keep summary requests independent of Logic Mode controls; expose failures,
+  deduplicate repeated completions, and reject late updates for older outputs.
+- Retain bounded summary records locally, with separate disable, key removal,
+  and summary deletion controls. Raw assistant output is not persisted.
+
 ## 1.9.13 beta 1
 
 - Allow a verified project-chat continuation to start while its heartbeat schedule

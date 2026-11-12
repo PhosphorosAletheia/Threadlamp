@@ -121,6 +121,44 @@ response. Threadlamp does not extend the model context or reset an
 account usage allowance. Quota errors must not be treated as permission to bypass
 limits. Check the live chat if a service or quota notice appears.
 
+## Optional last-output summaries
+
+Open **Settings** from the dashboard, find **Last output summaries**, enter your
+OpenRouter API key locally, enable summaries, and save. Allow access to
+`https://openrouter.ai` when Chrome asks. No key belongs in a chat or source file.
+
+For every completed Logic Mode response, Threadlamp sends only that assistant
+output, from its beginning through its ending Logic tag, to `openrouter/free`.
+CONTINUE, WAIT, USER_INPUT and IDLE all trigger summaries; an invalid WAIT tag can
+also be summarized while Logic Mode waits for correction. Earlier prompts,
+earlier responses, and the rest of the conversation are excluded. An unfinished
+response without a recognized final tag waits for the tag to appear. Resuming
+Logic Mode may summarize the current completed response once; it does not backfill
+conversation history. Loop mode is not included.
+
+The dashboard shows the latest successful summary beside its agent and in the
+agent's detail pane, with completion time, selected model, and ending tag. During
+a newer request or a failure, an earlier summary remains explicitly labeled.
+Summary requests do not delay automatic follow-ups or approve user-input requests.
+No overseer forwarding is included.
+
+The model is fixed to `openrouter/free`, with no paid-model fallback. Free-provider
+availability, rate limits and context windows vary. Requests time out after 25
+seconds; up to four can run concurrently. Outputs over 200,000 characters are
+reported as too large without sending an excerpt. Summaries are limited to 2,000
+characters. Failures are displayed and are not automatically retried; the next
+completed response gets a fresh attempt. A worker/browser restart marks an
+interrupted request as failed, without storing or replaying the original output.
+
+The API key and up to 100 conversation summary records remain in local extension
+storage. Each record holds the last successful summary and current request status,
+plus up to 30 completion hashes to prevent repeat requests. Raw outputs are not
+persisted. The key and summary records are excluded from encrypted settings backups.
+Disable summaries to stop future requests, use **Forget API key** to remove the
+key, or **Clear saved summaries** to delete the saved results. Clearing dashboard
+event history does not clear summaries. OpenRouter and the selected provider
+receive the output; their data policies apply.
+
 ## Optional Home Assistant notifications
 
 Use **Open settings in tab**. Enter your Home Assistant origin, mobile notification
