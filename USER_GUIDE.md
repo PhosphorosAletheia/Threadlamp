@@ -102,6 +102,12 @@ stops with a notice instead of guessing. Existing conversations are never used
 as automatic handoff destinations. The continuation includes the source project
 ID and chat link; the agent must request missing context if it cannot access it.
 
+If the landing page restores a complete Threadlamp handoff draft, Threadlamp
+clears it and writes a fresh continuation for the verified source conversation.
+Edited handoff text and unrelated drafts are preserved. The receipt, destination,
+and editor are checked again before clearing and sending. If the destination
+does not become ready, the stopped notice identifies the check that failed.
+
 A successful handoff means the continuation message was observed in the new chat;
 it does not verify that the model recovered all prior context. Review the first
 response. Threadlamp does not extend the model context or reset an

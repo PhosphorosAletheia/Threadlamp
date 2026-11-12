@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.11 beta 1
+
+- Replace a complete restored Threadlamp handoff draft with a fresh continuation
+  for the verified source project and conversation. Preserve edited or unrelated drafts.
+- Recheck the handoff receipt, destination, and draft before clearing the editor.
+- Verify the current browser document when a sender URL differs after navigation,
+  keeping alerts and related controls bound to the correct tab and main frame.
+- Report the specific readiness check that blocks a handoff instead of always
+  attributing a timeout to the project ID.
+
 ## 1.9.10 beta 1
 
 - Recover from a delivery timeout with one delayed reload of the same chat,
