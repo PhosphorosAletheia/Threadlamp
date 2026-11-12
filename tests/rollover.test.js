@@ -81,6 +81,8 @@ function exposeContentFunctions(source) {
       findProjectRolloverAction,
       buildRolloverPrompt,
       classifyRolloverDraft,
+      isGeneratedRolloverDraft,
+      rolloverReadinessIssue,
       rolloverDraftFingerprint,
       matchesSubmittedRolloverDraft,
       beginProjectRollover,

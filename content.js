@@ -556,6 +556,38 @@ ${LOGIC_START_PROMPT}
       : "preserve_manual";
   }
 
+  function isGeneratedRolloverDraft(draft) {
+    // Recognize only a complete template. A prefix or LOGIC marker alone is
+    // not evidence that a user's draft can be replaced.
+    const value = rolloverRenderedText(draft);
+    if (value.length > 8000) return false;
+    const match = value.match(/^This chat is a continuation of the project chat titled ("(?:[^"\\]|\\.)*"), which reached the maximum conversation length\./);
+    if (!match) return false;
+    let title;
+    try { title = JSON.parse(match[1]); } catch { return false; }
+    if (!title || title.length > 240) return false;
+    const plain = buildRolloverPrompt(title);
+    const candidates = [plain, plain.replace("only as a display label", "only as an identifier")];
+    const source = value.match(/ Source project ID: (g-p-[a-f0-9]{32}) Source conversation: (https:\/\/\S+) Use these identifiers/i);
+    if (source && sameRolloverProject(source[1], projectSegmentFromLocation(source[2]))) {
+      candidates.push(buildRolloverPrompt(title, source[2]));
+    }
+    return candidates.some(candidate => rolloverRenderedText(candidate) === value);
+  }
+
+  function rolloverReadinessIssue(sourcePath, projectSegment, needsProjectHome) {
+    if (!destinationMatchesProject(projectSegment)) return "the destination project ID could not be matched to the source";
+    if (window.location.pathname === sourcePath) return "the page did not leave the original conversation";
+    if (hasMaximumLengthNotice()) return "the conversation-limit notice is still present";
+    if (!findComposer()) return "the destination message editor was not found";
+    if (latestMessageSnapshot("user").element || latestMessageSnapshot("assistant").element) {
+      return "conversation messages are still present in the destination page";
+    }
+    if (isGenerating()) return "the destination is already generating a response";
+    if (needsProjectHome && !projectHomeReady()) return "the destination is not a ready project landing page";
+    return "";
+  }
+
   // Rich-text composers and rendered messages can use different runs of ordinary
   // spaces/newlines. Keep tabs, Unicode spaces, invisible characters and all
   // non-whitespace text significant. This applies only to a submitted-source
@@ -1591,6 +1623,9 @@ ${LOGIC_START_PROMPT}
     const composer = findComposer();
     const carriedDraft = composerText(composer);
     let draftAction = classifyRolloverDraft(carriedDraft, message);
+    if (draftAction === "preserve_manual" && isGeneratedRolloverDraft(carriedDraft)) {
+      draftAction = "replace_carryover";
+    }
     if (draftAction === "preserve_manual"
       && await matchesSubmittedRolloverDraft(carriedDraft, pending?.sourceUserFingerprint)) {
       draftAction = "replace_carryover";
@@ -1604,6 +1639,16 @@ ${LOGIC_START_PROMPT}
       throw new Error(
         "The new project chat contains a different draft. It was preserved and Logic Mode stopped."
       );
+    }
+    if (pending.requestId) {
+      const check = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_CHECK", requestId: pending.requestId });
+      if (!check?.ok) throw new Error(check?.error || "The handoff expired or was cancelled. The draft was preserved.");
+    }
+    if (state.runId !== entryRunId) return false;
+    if (window.location.href !== destinationUrl || !destinationMatchesProject(pending?.projectSegment)
+      || latestMessageSnapshot("user").element || latestMessageSnapshot("assistant").element || isGenerating()
+      || findComposer() !== composer || composerText(composer) !== carriedDraft) {
+      throw new Error("The new chat or its draft changed while verifying the handoff. The draft was preserved.");
     }
     if (draftAction === "replace_carryover") {
       if (!clearComposer(composer)) {
@@ -1766,16 +1811,10 @@ ${LOGIC_START_PROMPT}
       verifiedAction.element.click();
 
       const deadline = Date.now() + LOGIC_ROLLOVER_TRANSITION_TIMEOUT_MS;
+      let readinessIssue = "the destination did not become ready";
       while (state.running && state.runId === runId && Date.now() < deadline) {
-        const transitioned = (
-          destinationMatchesProject(projectSegment)
-          && window.location.pathname !== sourcePath
-          && !hasMaximumLengthNotice()
-          && Boolean(findComposer())
-          && !latestMessageSnapshot("user").element && !latestMessageSnapshot("assistant").element
-          && (rolloverAction.kind !== "project_home" || projectHomeReady())
-        );
-        if (transitioned) {
+        readinessIssue = rolloverReadinessIssue(sourcePath, projectSegment, rolloverAction.kind === "project_home");
+        if (!readinessIssue) {
           const claimed = await chrome.runtime.sendMessage({
             type: "LOGIC_ROLLOVER_CLAIM",
             requestId,
@@ -1812,7 +1851,7 @@ ${LOGIC_START_PROMPT}
         finishRolloverLocally("Logic Mode moved to the new project chat.");
       } else {
         finishRolloverLocally(
-          "Stopped: the handoff was not confirmed in a chat with the same project ID. Inspect the destination before resuming.",
+          `Stopped: the handoff was not confirmed because ${readinessIssue}. The destination draft was preserved. Inspect it before resuming.`,
           true,
           { previousTitle, failureId: requestId }
         );

@@ -23,6 +23,56 @@ function destination(timing, captureRun = true) {
 
 (async () => {
   const helper = contentHarness().api;
+  const oldHandoff = helper.buildRolloverPrompt("Different agent")
+    .replace("only as a display label", "only as an identifier");
+  const sourceUrl = `https://chatgpt.com/g/${project}/c/original`;
+  const modernHandoff = helper.buildRolloverPrompt("Original agent", sourceUrl);
+  for (const draft of [oldHandoff, modernHandoff, oldHandoff.replace(/\n/g, "\n\n")]) {
+    const h = destination();
+    h.composer.textContent = draft;
+    h.setRequestHandler(async () => ({ ok: true }));
+    await h.api.startClaimedLogicRollover({ ...h.pending, requestId: "receipt", sourceUrl });
+    assert.equal(h.composer.textContent, "", "a complete restored template is cleared after receipt verification");
+    assert.equal(h.runs.length, 1);
+    assert.ok(h.runs[0][2].includes("Source conversation: " + sourceUrl));
+    assert.ok(!h.runs[0][2].includes('titled "Different agent"'), "fresh prompt uses this handoff's source");
+  }
+  for (const draft of [oldHandoff + " Extra instructions", oldHandoff.replace("Continue the unfinished task", "Delete the unfinished task"),
+    oldHandoff.split("Start Logic Mode")[0], "My notes: " + oldHandoff]) {
+    const h = destination();
+    h.composer.textContent = draft;
+    await assert.rejects(h.api.startClaimedLogicRollover({ ...h.pending, sourceUrl }), /different draft/);
+    assert.equal(h.composer.textContent, draft);
+    assert.equal(h.runs.length, 0);
+  }
+  for (const change of ["cancel", "draft", "navigation", "user", "stop"]) {
+    const h = destination();
+    h.composer.textContent = oldHandoff;
+    h.setRequestHandler(async request => {
+      if (request.type === "LOGIC_ROLLOVER_CHECK") {
+        if (change === "cancel") return { ok: false, error: "Handoff cancelled" };
+        if (change === "draft") h.composer.textContent = "New human instructions";
+        if (change === "navigation") h.window.location = new URL("https://chatgpt.com/c/unrelated");
+        if (change === "user") h.api.setTimeoutSnapshotsForTest(() => ({element: visibleElement("New message"),text:"New message"}));
+        if (change === "stop") h.api.state.runId++;
+      }
+      return { ok: true };
+    });
+    const action = h.api.startClaimedLogicRollover({ ...h.pending, requestId: "receipt", sourceUrl });
+    if (change === "stop") assert.equal(await action, false);
+    else await assert.rejects(action, /cancelled|draft changed/);
+    assert.equal(h.runs.length, 0);
+    assert.equal(h.composer.textContent, change === "draft" ? "New human instructions" : oldHandoff);
+  }
+  {
+    const h = destination();
+    const sourcePath = new URL(sourceUrl).pathname;
+    assert.equal(h.api.rolloverReadinessIssue(sourcePath, project, true), "");
+    h.api.setTimeoutSnapshotsForTest(() => ({element: visibleElement("Retained turn"),text:"Retained turn"}));
+    assert.match(h.api.rolloverReadinessIssue(sourcePath, project, true), /messages are still present/);
+    h.window.location = new URL("https://chatgpt.com/");
+    assert.match(h.api.rolloverReadinessIssue(sourcePath, project, true), /project ID/);
+  }
   const fingerprint = await helper.rolloverDraftFingerprint(submitted);
   assert.equal(fingerprint.length, submitted.length);
   assert.match(fingerprint.sha256, /^[a-f0-9]{64}$/);
@@ -44,7 +94,7 @@ function destination(timing, captureRun = true) {
   // The duplicate is only cleared. The real send path must write and send the
   // extension's title-based continuation protocol, never replay the duplicate.
   const actual = destination(undefined, false);
-  actual.composer.textContent = submitted.replace(" a ", "  a ");
+  actual.composer.textContent = oldHandoff;
   const form = visibleElement();
   const high = visibleElement("High", { "aria-label": "Select ChatGPT model", "aria-haspopup": "menu", "aria-expanded": "false" });
   form.querySelectorAll = () => [high];
