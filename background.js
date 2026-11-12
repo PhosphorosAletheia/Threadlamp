@@ -1234,7 +1234,7 @@ function startInitialization() {
 let initializationPromise = startInitialization();
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (/^(HB_|SL_|DB_)/.test(String(request?.type || ""))) return false;
+  if (/^(HB_|SL_|DB_|LR_)/.test(String(request?.type || ""))) return false;
   // Let the offscreen document exclusively handle its private audio message.
   if (request?.type === "OFFSCREEN_PLAY_USER_INPUT_SOUND") return false;
 

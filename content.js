@@ -22,7 +22,6 @@
   const MINUTE_MS = 60 * 1000;
   const LOGIC_STATUS_PROMPT = "Status";
   const DELIVERY_TIMEOUT_MESSAGE = "message delivery timed out. please try again.";
-  const DELIVERY_TIMEOUT_CONTINUE = "continue";
   const QUICK_ACTIONS = [
     { label: "Continue", prompt: "continue" },
     { label: "Status", prompt: "status" }
@@ -106,6 +105,15 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
 
   let overlayHost = null;
   let terminalNotice = false;
+  let reconnectAttempted = false;
+  let reconnectPending = false;
+  let reconnectToken = "";
+  let reconnectBoundRun = null;
+  let reconnectCheckpoint = null;
+  let reconnectCheckpointBusy = false;
+  let timeoutSeenAt = null;
+  let reconnectRestoring = false;
+
   let runOwnership = null;
   let idleLogicUrl = "";
   let promptControlsExpanded = false;
@@ -168,7 +176,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     const assistants = messageElements("assistant");
     const lastUser = users.at(-1);
     const lastAssistant = assistants.at(-1);
-    if (!lastUser || !lastAssistant) return null;
+
     const candidates = new Set();
     for (const button of document.querySelectorAll("button, [role='button']")) {
       if (!buttonIsEnabled(button) || normalizeText(button.getAttribute("aria-label") || button.textContent) !== "retry") continue;
@@ -180,8 +188,9 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
         // textContent may concatenate sibling blocks without a separator.
         if (![`${DELIVERY_TIMEOUT_MESSAGE} retry`, `${DELIVERY_TIMEOUT_MESSAGE}retry`,
           `retry ${DELIVERY_TIMEOUT_MESSAGE}`, `retry${DELIVERY_TIMEOUT_MESSAGE}`].includes(text)) continue;
-        if (!isVisible(parent) || [...users, ...assistants].some(turn => turn.contains(parent) || parent.contains(turn))) break;
-        if (!elementComesAfter(parent, lastUser) || !elementComesAfter(parent, lastAssistant)) break;
+        if (!isVisible(parent) || parent.closest("article, [data-message-author-role], [data-message-content], .markdown, .prose")
+          || [...users, ...assistants].some(turn => turn.contains(parent) || parent.contains(turn))) break;
+        if ((lastUser && !elementComesAfter(parent, lastUser)) || (lastAssistant && !elementComesAfter(parent, lastAssistant))) break;
         candidates.add(parent);
         break;
       }
@@ -195,36 +204,174 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     return notice ? { deliveryTimeout: true, notice, element: null, text: "" } : null;
   }
 
+  function reconnectMessage(type, extra = {}) {
+    return chrome.runtime.sendMessage({ type, instanceId: heartbeatInstanceId,
+      url: window.location.href, ...extra });
+  }
+
+  async function reconnectHash(text) {
+    const bytes = new TextEncoder().encode(rolloverRenderedText(text));
+    const hash = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function reconnectUserHash(snapshot) {
+    const element = snapshot.element;
+    const identified = element?.getAttribute("data-message-id") ? element
+      : element?.closest("[data-message-id]") || element?.querySelector?.("[data-message-id]");
+    const id = identified?.getAttribute("data-message-id");
+    return id && snapshot.text ? reconnectHash(`${id}\n${snapshot.text}`) : "";
+  }
+
+  function reconnectPageError() {
+    return [...document.querySelectorAll("[role='alert']")].find(e => isVisible(e)
+      && !e.closest("article, [data-message-author-role], .markdown, .prose")
+      && /error|try again|too many requests|rate limit|unable to load|something went wrong/i.test(e.textContent || ""));
+  }
+
+  async function checkpointLogicRun(allowPaused = false) {
+    if (reconnectCheckpointBusy || reconnectRestoring || !state.running || state.mode !== "logic"
+      || (state.paused && !allowPaused) || state.error || queuedPrompt || queuedPromptInFlight
+      || !["monitoring", "resuming"].includes(state.logicPhase)) return null;
+    reconnectCheckpointBusy = true;
+    const runId = state.runId, url = window.location.href, count = state.count;
+    try {
+      await assertRunLocation(runId);
+      const user = latestMessageSnapshot("user");
+      // An unacknowledged send must be present after reload before automation can resume.
+      const submitted = runOwnership?.submitted;
+      const unconfirmedSend = Boolean(submitted && (user.element ? !snapshotChanged(user, submitted.before)
+        : reconnectCheckpoint?.count !== count || !reconnectCheckpoint?.verifiedUser));
+      const observedHash = await reconnectUserHash(user);
+      const userHash = observedHash || reconnectCheckpoint?.userHash;
+      const verifiedUser = observedHash ? !unconfirmedSend : Boolean(!user.element && !user.text && reconnectCheckpoint?.verifiedUser && !unconfirmedSend);
+      if (!userHash || !state.running || state.runId !== runId || window.location.href !== url
+        || (state.paused && !allowPaused) || state.count !== count) return null;
+      reconnectToken ||= `${heartbeatInstanceId}:${runId}`;
+      const settings = { message: state.message, limit: state.limit, count,
+        rolloverEnabled: state.rolloverEnabled, userHash, verifiedUser };
+      const result = await reconnectMessage("LR_SAVE", { token: reconnectToken, settings });
+      if (!result?.ok) throw new Error(result?.error || "The reconnection checkpoint could not be saved.");
+      if (state.runId === runId && window.location.href === url) reconnectCheckpoint = settings;
+      return settings;
+    } finally { reconnectCheckpointBusy = false; }
+  }
+
+  function pauseReconnect(detail) {
+    state.runId += 1;
+    state.running = false; state.paused = false; state.mode = "logic";
+    state.logicPhase = "recovery_paused";
+    state.waitUntil = null; state.waitMinutes = null;
+    reconnectPending = false;
+    setDetail(`Paused: ${detail} No prompt was resent.`, true);
+    void requestHomeAssistantError(state.detail);
+    void reconnectMessage("LR_CLEAR").catch(() => {});
+  }
+
   async function recoverDeliveryTimeout(runId, response) {
-    if (state.count >= state.limit) throw new Error("Message delivery timed out, but the automatic-message limit has been reached. No recovery message was sent.");
-    const url = window.location.href;
-    const beforeUser = latestMessageSnapshot("user");
-    const beforeAssistant = latestMessageSnapshot("assistant");
-    const guard = (composer, draft) => {
-      if (window.location.href !== url) throw new Error("The chat changed during timeout recovery. No recovery message was sent.");
-      const currentUser = latestMessageSnapshot("user");
-      const currentAssistant = latestMessageSnapshot("assistant");
-      if (currentUser.element !== beforeUser.element || currentUser.text !== beforeUser.text
-        || currentAssistant.element !== beforeAssistant.element || currentAssistant.text !== beforeAssistant.text) {
-        throw new Error("Chat activity changed during timeout recovery. The draft was preserved; no recovery message was sent.");
+    if (reconnectPending) return null;
+    if (reconnectAttempted) { pauseReconnect("ChatGPT reported another delivery timeout after reconnection."); return null; }
+    reconnectPending = true;
+    const url = window.location.href, userBeforeReload = latestMessageSnapshot("user");
+    try {
+      await assertRunLocation(runId);
+      if (queuedPrompt || queuedPromptInFlight) throw new Error("A queued prompt needs review before reloading; it has been preserved.");
+      if (composerText(findComposer())) throw new Error("A draft is present and has been preserved. Reload manually after saving it.");
+      state.paused = true;
+      while (reconnectCheckpointBusy && state.running && state.runId === runId) await sleep(POLL_MS);
+      const settings = await checkpointLogicRun(true) || reconnectCheckpoint;
+      if (!settings || settings.count !== state.count || settings.limit !== state.limit || settings.message !== state.message) throw new Error("No verified run checkpoint is available. Inspect the chat before resuming.");
+      if (!state.running || state.runId !== runId || window.location.href !== url) return null;
+      state.paused = false;
+      setDetail("Connection lost. Waiting 30 seconds before one reload; no prompt will be resent…");
+      state.paused = true; state.pausedDetail = state.detail;
+      state.logicPhase = "reconnecting"; updateOverlay();
+      const started = Date.now();
+      while (Date.now() - started < 30000) {
+        if (!state.running || state.runId !== runId) return null;
+        if (window.location.href !== url || !state.paused || isGenerating()
+          || queuedPrompt || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
+          || findDeliveryTimeoutNotice() !== response.notice) {
+          throw new Error("The chat changed while preparing reconnection. Inspect it before resuming.");
+        }
+        await sleep(POLL_MS);
       }
-      if (isGenerating() || findComposer() !== composer || !composerDraftMatches(composer, draft)) throw new Error("The chat became busy or its draft changed during timeout recovery. No recovery message was sent.");
-      // Typing can dismiss a service notice, so verify the notice before writing;
-      // before Send, recheck the page, messages, generation and owned draft.
-      if (!draft && findDeliveryTimeoutNotice() !== response.notice) throw new Error("The delivery-timeout notice changed before recovery. No recovery message was sent.");
-      return true;
-    };
-    setDetail("Message delivery timed out. Preparing one fresh continue message…");
-    const sent = await submitMessage(runId, DELIVERY_TIMEOUT_CONTINUE,
-      "Sending a fresh continue after the delivery timeout…", null, SEND_ENABLE_TIMEOUT_MS, guard, true);
-    if (!state.running || state.runId !== runId) return null;
-    if (!sent) throw new Error("The message box did not become ready for timeout recovery. Any draft was preserved; no recovery message was sent.");
-    state.count += 1;
-    const user = await waitForUserMessage(runId, beforeUser, true);
-    if (!user || state.runId !== runId) return null;
-    state.logicPhase = "monitoring";
-    setDetail("Timeout recovery continue sent. Waiting for ChatGPT's response…");
-    return { user, response: await waitForAssistantResponse(runId, beforeAssistant) };
+      const result = await reconnectMessage("LR_PREPARE", { token: reconnectToken, settings });
+      if (!result?.ok) throw new Error(result?.error || "Reconnection could not be prepared.");
+      if (!state.running || state.runId !== runId || window.location.href !== url || !state.paused
+        || isGenerating() || queuedPrompt || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
+          || findDeliveryTimeoutNotice() !== response.notice) {
+        await reconnectMessage("LR_CLEAR");
+        if (state.runId === runId) throw new Error("The chat changed before reload. Inspect it before resuming.");
+        return null;
+      }
+      reconnectAttempted = true;
+      window.location.reload();
+      return null;
+    } catch (error) {
+      if (state.runId === runId) pauseReconnect(error.message);
+      return null;
+    } finally { reconnectPending = false; }
+  }
+
+  async function restoreLogicReconnect() {
+    reconnectRestoring = true;
+    const url = window.location.href, priorRun = state.runId;
+    try {
+      const result = await reconnectMessage("LR_CLAIM");
+      if (!result?.ok || !result.record || state.running || state.runId !== priorRun || window.location.href !== url) return;
+      const record = result.record;
+      reconnectToken = record.token; reconnectCheckpoint = record.settings;
+      reconnectAttempted = Boolean(record.attempted);
+      Object.assign(state, record.settings, { running: true, mode: "logic", logicPhase: "reconnecting", paused: false, error: false });
+      delete state.userHash; delete state.verifiedUser;
+      state.runId += 1;
+      const runId = state.runId;
+      bindRunOwnership(runId);
+      if (!record.settings.verifiedUser) { pauseReconnect("The last submitted message could not be verified. Inspect the recovered chat before resuming."); return; }
+      if (!record.requested) { pauseReconnect("The previous Logic run was interrupted. Inspect the chat and resume manually."); return; }
+      setDetail("Reconnected. Waiting for the saved conversation to load without sending a prompt…");
+      const started = Date.now();
+      let readySince = null;
+      while (state.running && state.runId === runId && Date.now() - started < 60000) {
+        if (window.location.href !== url) throw new Error("The conversation changed after reload.");
+        if (findDeliveryTimeoutNotice() || hasMaximumLengthNotice()) throw new Error("ChatGPT reported another error after reload.");
+        if (reconnectPageError()) throw new Error("ChatGPT reported another error after reload.");
+        const user = latestMessageSnapshot("user"), composer = findComposer();
+        if (composerText(composer)) throw new Error("A draft is present after reload; it has been preserved.");
+        const matches = Boolean(composer && user.element && user.text && await reconnectUserHash(user) === record.settings.userHash);
+        if (!state.running || state.runId !== runId) return;
+        if (window.location.href !== url || composerText(findComposer())) throw new Error("The chat or draft changed while verifying reconnection.");
+        if (snapshotChanged(latestMessageSnapshot("user"), user)) { readySince = null; await sleep(POLL_MS); continue; }
+        if (matches) {
+          readySince ??= Date.now();
+          if (Date.now() - readySince >= ACTIVITY_WINDOW_MS) {
+            reconnectRestoring = false;
+            void runLogicMode(runId, true);
+            return;
+          }
+        } else readySince = null;
+        await sleep(POLL_MS);
+      }
+      if (state.runId === runId && state.running) throw new Error("The saved conversation could not be verified within 60 seconds of reload.");
+    } catch (error) {
+      if (window.location.href === url && state.runId >= priorRun && state.logicPhase === "reconnecting") pauseReconnect(error.message);
+    } finally { reconnectRestoring = false; }
+  }
+
+  async function monitorLogicReconnect() {
+    if (reconnectRestoring || reconnectPending) return;
+    if (!state.running || state.mode !== "logic" || state.paused || state.error) { timeoutSeenAt = null; return; }
+    if (!["monitoring", "starting", "resuming"].includes(state.logicPhase)) return;
+    if (reconnectAttempted && reconnectPageError()) { pauseReconnect("ChatGPT reported another error after reconnection."); return; }
+    const timeout = deliveryTimeoutResponse();
+    if (timeout) {
+      timeoutSeenAt ??= Date.now();
+      if (Date.now() - timeoutSeenAt >= ACTIVITY_WINDOW_MS) await recoverDeliveryTimeout(state.runId, timeout);
+    } else {
+      timeoutSeenAt = null;
+      try { await checkpointLogicRun(); } catch { /* Recovery will report an unavailable checkpoint if needed. */ }
+    }
   }
 
   function projectSegmentFromLocation(value = window.location.href) {
@@ -2021,6 +2168,7 @@ ${LOGIC_START_PROMPT}
 
   function setDetail(detail, error = false, retainNotice = false) {
     terminalNotice = !state.running && (error || retainNotice);
+    if (!state.running && reconnectToken) void reconnectMessage("LR_CLEAR").catch(() => {});
     if (state.mode === "logic" && state.paused) {
       state.pausedDetail = detail;
       state.error = error;
@@ -2261,7 +2409,7 @@ ${LOGIC_START_PROMPT}
     const timer = overlayHost.shadowRoot.querySelector(".timer");
     const pauseButton = overlayHost.shadowRoot.querySelector(".pause");
     const label = state.mode === "setup" ? "Server setup" : state.mode === "logic" || queuedPrompt ? "Logic mode" : "Continue loop";
-    headline.textContent = terminalNotice ? "Threadlamp · Stopped" : `${label}${idleCycle ? " · Idle" : ""} · ${state.count}/${state.limit}`;
+    headline.textContent = terminalNotice ? (state.logicPhase === "recovery_paused" ? "Threadlamp · Paused" : "Threadlamp · Stopped") : `${label}${idleCycle ? " · Idle" : ""} · ${state.count}/${state.limit}`;
     overlayHost.shadowRoot.querySelector(".dismiss").hidden = !terminalNotice;
     detail.textContent = state.detail;
 
@@ -2492,6 +2640,10 @@ ${LOGIC_START_PROMPT}
   }
 
   function bindRunOwnership(runId) {
+    if (reconnectBoundRun !== runId && !reconnectRestoring) {
+      reconnectAttempted = false; reconnectToken = ""; reconnectCheckpoint = null; timeoutSeenAt = null;
+    }
+    reconnectBoundRun = runId;
     runOwnership = { runId, identity: chatIdentity(), url: window.location.href, submitted: null };
   }
 
@@ -3223,7 +3375,7 @@ ${LOGIC_START_PROMPT}
   ) {
     bindRunOwnership(runId);
     let startupComplete = resume;
-    let timeoutRecoveryAttempted = false;
+
     const chatTitle = currentConversationTitle() || startupFailureContext?.previousTitle || "";
 
     try {
@@ -3300,13 +3452,8 @@ ${LOGIC_START_PROMPT}
         if (!await waitForLogicResume(runId)) return;
 
         if (response.deliveryTimeout) {
-          if (timeoutRecoveryAttempted) throw new Error("Message delivery timed out again after one fresh continue. Logic Mode stopped; inspect the chat before resuming.");
-          timeoutRecoveryAttempted = true;
-          const recovered = await recoverDeliveryTimeout(runId, response);
-          if (!recovered || state.runId !== runId) return;
-          previousUser = recovered.user;
-          response = recovered.response;
-          continue;
+          await recoverDeliveryTimeout(runId, response);
+          return;
         }
 
         // Multiple manual messages can be queued before one assistant reply.
@@ -3322,7 +3469,7 @@ ${LOGIC_START_PROMPT}
           flag,
           generatedImageFallback
         } = classifyLogicResponse(response);
-        if (["continue", "wait", "idle", "user_input"].includes(flag)) timeoutRecoveryAttempted = false;
+
         state.userInputBrief = flag === "user_input"
           ? parseLogicBrief(response.text)
           : "";
@@ -3506,6 +3653,7 @@ ${LOGIC_START_PROMPT}
       const failureDetail = error instanceof Error
         ? error.message
         : "Logic Mode stopped unexpectedly.";
+      if (reconnectAttempted) { pauseReconnect(failureDetail); return; }
       state.running = false;
       state.mode = "idle";
       state.logicPhase = "idle";
@@ -3559,7 +3707,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function startLoop(message, limit) {
-    if (state.running) return publicStatus();
+    if (state.running || reconnectRestoring) return publicStatus();
 
     const cleanMessage = typeof message === "string" ? message.trim() : "";
     const cleanLimit = Number.parseInt(limit, 10);
@@ -3607,7 +3755,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function startLogicMode(message, limit, rolloverEnabled = false) {
-    if (state.running) return publicStatus();
+    if (state.running || reconnectRestoring) return publicStatus();
 
     const cleanMessage = typeof message === "string" ? message.trim() : "";
     const cleanLimit = Number.parseInt(limit, 10);
@@ -3620,6 +3768,8 @@ ${LOGIC_START_PROMPT}
       return { ...publicStatus(), error: true, detail: "Choose a limit from 1 to 1000." };
     }
 
+    reconnectAttempted = false; reconnectToken = ""; reconnectCheckpoint = null;
+    timeoutSeenAt = null;
     state.running = true;
     state.count = 0;
     state.limit = cleanLimit;
@@ -3648,7 +3798,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function resumeLogicMode(message, limit, rolloverEnabled = false) {
-    if (state.running) return publicStatus();
+    if (state.running || reconnectRestoring) return publicStatus();
 
     const cleanMessage = typeof message === "string" ? message.trim() : "";
     const cleanLimit = Number.parseInt(limit, 10);
@@ -3661,6 +3811,8 @@ ${LOGIC_START_PROMPT}
       return { ...publicStatus(), error: true, detail: "Choose a limit from 1 to 1000." };
     }
 
+    reconnectAttempted = false; reconnectToken = ""; reconnectCheckpoint = null;
+    timeoutSeenAt = null;
     state.running = true;
     state.count = 0;
     state.limit = cleanLimit;
@@ -3706,6 +3858,12 @@ ${LOGIC_START_PROMPT}
       return publicStatus();
     }
     if (state.mode !== "logic") return publicStatus();
+    if (["reconnecting", "recovery_paused"].includes(state.logicPhase)) {
+      state.runId += 1; state.running = false; state.paused = false;
+      state.mode = "idle"; state.logicPhase = "idle";
+      setDetail("Reconnection cancelled. No prompt was sent.", false, true);
+      return publicStatus();
+    }
     if (state.logicPhase === "stopping") return publicStatus();
 
     if (state.logicPhase === "rolling_over") {
@@ -3912,8 +4070,11 @@ ${LOGIC_START_PROMPT}
 
   createQuickActions();
   updateQuickActions();
-  void claimPendingLogicRollover();
-  void attachHeartbeat();
+  void restoreLogicReconnect().finally(() => {
+    void claimPendingLogicRollover();
+    void attachHeartbeat();
+  });
+  window.setInterval(() => { void monitorLogicReconnect().catch(() => {}); }, 1000);
   if (typeof ServerLink !== "undefined" && ServerLink.chatKey(window.location.href)) {
     // Detect an abandoned send claim after a page reload without sending a prompt.
     void serverMessage("SL_STATUS").catch(() => {});

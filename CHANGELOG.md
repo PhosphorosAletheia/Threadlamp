@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.10 beta 1
+
+- Recover from a delivery timeout with one delayed reload of the same chat,
+  without resending the failed prompt or clicking Retry.
+- Restore verified Logic Mode settings and counts, observe an active response,
+  and process a completed response using its normal Logic flag.
+- Recognize timeout pages with no composer or chat turns. Pause visibly if
+  reconnection fails, another error appears, or the chat cannot be verified.
+- Preserve drafts and queued instructions by pausing instead of reloading when
+  either is present.
+
 ## 1.9.9 beta 1
 
 - Fix dashboard project names being replaced by the accessibility label

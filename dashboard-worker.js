@@ -141,7 +141,7 @@
         const agent = data.agents[event.agentKey];
         return { ...event, title: labels(data, { ...event, url: event.url || agent?.url,
           projectTitle: event.projectTitle || agent?.projectTitle }).title };
-      }), version: chrome.runtime.getManifest?.().version || "1.9.9" };
+      }), version: chrome.runtime.getManifest?.().version || "1.9.10" };
   }
   async function inspect(target, sender) {
     await verifyTarget(target);

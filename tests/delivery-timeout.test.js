@@ -19,7 +19,7 @@ function fixture(outcomes = ["idle"]) {
   } });
   h.window.location = new URL("https://chatgpt.com/c/timeout-chat");
   h.document.title = "Timed out research";
-  const turn = (rank, text) => Object.assign(visibleElement(text), {
+  const turn = (rank, text) => Object.assign(visibleElement(text, { "data-message-id": `message-${rank}` }), {
     rank, contains(node) { return node === this; },
     compareDocumentPosition(node) { return node.rank > this.rank ? 4 : 0; }
   });
@@ -83,117 +83,120 @@ function fixture(outcomes = ["idle"]) {
 
 async function runTests() {
   let f = fixture();
+  let reloads = 0;
+  f.window.location.reload = () => { reloads++; };
   assert.equal(f.api.findDeliveryTimeoutNotice(), f.notice);
-  assert.equal(f.api.deliveryTimeoutResponse().deliveryTimeout, true);
   await f.run();
-  assert.deepEqual(f.writes, ["continue"]);
-  assert.deepEqual(f.sends, ["continue"]);
-  assert.equal(f.api.state.count, 1);
-  assert.equal(f.api.state.running, false);
-  assert.equal(f.api.state.error, false);
-  assert.equal(f.requests.some(r => r.type === "HA_NOTIFY_ERROR"), false);
+  assert.equal(reloads, 1);
+  assert.deepEqual(f.writes, [], "reconnection never writes or resends a prompt");
+  assert.deepEqual(f.sends, []);
+  assert.equal(f.api.state.count, 0, "reload does not consume an automatic message");
+  assert.ok(f.requests.find(r => r.type === "LR_PREPARE"));
+  assert.ok(f.api.state.paused, "the old page cannot keep sending during reload");
 
-  f = fixture(["delayed-idle"]);
-  f.notice.textContent = `${ERROR}Retry`;
-  await f.run();
-  assert.deepEqual(f.sends, ["continue"], "adjacent DOM text and a lingering notice are supported");
-  assert.equal(f.api.state.error, false);
+  f = fixture();
+  await f.api.checkpointLogicRun();
+  f.api.setTimeoutElementsForTest(() => []);
+  f.api.setTimeoutSnapshotsForTest(() => ({ element: null, text: "" }));
+  f.setSelector("#prompt-textarea", []);
+  f.window.location.reload = () => { reloads++; };
+  assert.equal(f.api.findDeliveryTimeoutNotice(), f.notice, "captured empty-page timeout is recognized");
+  await f.api.recoverDeliveryTimeout(1, f.api.deliveryTimeoutResponse());
+  assert.equal(reloads, 2, "empty page reloads using the earlier checkpoint");
 
-  for (const outcome of ["timeout", "timeout-no-user"]) {
-    f = fixture([outcome]);
+  for (const change of ["draft", "queued", "second-timeout", "no-checkpoint", "storage-failure"]) {
+    f = fixture();
+    f.window.location.reload = () => { throw new Error("Unexpected reload"); };
+    if (change === "draft") f.composer.innerText = f.composer.textContent = "My draft";
+    if (change === "queued") f.api.queueAdditionalPrompt("Queued instruction");
+    if (change === "second-timeout") f.api.setReconnectAttemptedForTest(true);
+    if (change === "no-checkpoint") f.api.setTimeoutSnapshotsForTest(() => ({ element: null, text: "" }));
+    if (change === "storage-failure") f.setRequestHandler(async r => r.type.startsWith("LR_") ? { ok: false, error: "Storage unavailable" } : { ok: true });
     await f.run();
-    assert.deepEqual(f.sends, ["continue"], "consecutive timeout never loops or replays the failed prompt");
-    assert.equal(f.api.state.running, false);
-    assert.equal(f.api.state.error, true);
-    assert.match(f.api.state.detail, /timed out again/);
-    const errors = f.requests.filter(r => r.type === "HA_NOTIFY_ERROR");
-    assert.equal(errors.length, 1);
-    assert.equal(errors[0].chatTitle, "Timed out research");
+    assert.deepEqual(f.sends, [], change);
+    assert.equal(f.api.state.error, true, change);
+    assert.equal(f.api.state.logicPhase, "recovery_paused", change);
+    assert.equal(f.api.getOverlayForTest().isConnected, true, change);
   }
 
-  f = fixture(["continue", "timeout", "idle"]);
-  await f.run();
-  assert.deepEqual(f.sends, ["continue", "Configured followup", "continue"], "a completed valid response permits recovery of a later independent incident");
-  assert.equal(f.api.state.count, 3);
-
-  // A timeout may prevent a user bubble even during initial startup delivery.
-  f = fixture(["timeout-no-user", "idle"]);
-  await f.api.runLogicMode(1, false, "Unique startup prompt");
-  assert.deepEqual(f.sends, ["Unique startup prompt", "continue"]);
-  assert.equal(f.api.state.count, 1);
-  assert.equal(f.api.state.error, false);
-
-  for (const change of ["hidden", "quoted", "old", "extra-text", "wrong-text", "disabled-retry", "no-assistant", "ambiguous"]) {
+  for (const change of ["old", "extra-text", "wrong-text", "disabled-retry", "ambiguous", "inside-transcript"]) {
     f = fixture();
-    if (change === "hidden") f.hide();
-    if (change === "quoted") f.assistant().contains = node => node === f.notice;
     if (change === "old") f.notice.rank = 0;
     if (change === "extra-text") f.notice.textContent += " unrelated text";
     if (change === "wrong-text") f.notice.textContent = "Something went wrong. Retry";
     if (change === "disabled-retry") f.retry.disabled = true;
-    if (change === "no-assistant") f.api.setTimeoutElementsForTest(role => role === "user" ? [f.user()] : []);
+    if (change === "inside-transcript") f.notice.closest = () => ({});
     if (change === "ambiguous") {
-      const other = Object.assign({}, f.notice);
-      const retry = Object.assign(visibleElement("Retry"), { parentElement: other });
+      const retry = Object.assign(visibleElement("Retry"), { parentElement: { ...f.notice } });
       f.setSelector("button, [role='button']", [f.retry, retry]);
     }
     assert.equal(f.api.findDeliveryTimeoutNotice(), null, change);
   }
-
-  f = fixture();
-  f.api.state.mode = "loop";
-  assert.equal(f.api.deliveryTimeoutResponse(), null, "repeat mode must not inherit Logic Mode recovery");
-  f = fixture();
-  f.setSelector("button[data-testid='stop-button']", [visibleElement()]);
-  assert.equal(f.api.deliveryTimeoutResponse(), null, "never recover while generation is active");
-  f.onTick(() => f.setSelector("button[data-testid='stop-button']", []));
-  await f.run();
-  assert.deepEqual(f.sends, ["continue"]);
-
-  f = fixture();
-  f.api.state.count = f.api.state.limit;
-  await f.run();
-  assert.deepEqual(f.sends, []);
-  assert.match(f.api.state.detail, /limit has been reached/);
-
-  f = fixture();
-  f.composer.innerText = f.composer.textContent = "My manual draft";
-  await f.run();
-  assert.deepEqual(f.writes, []);
-  assert.equal(f.composer.innerText, "My manual draft");
-  assert.equal(f.api.state.error, true);
-
-  for (const change of ["stop", "pause", "navigate", "new-user", "notice-disappeared"]) {
+  for (const change of ["stop", "navigate", "draft", "notice-disappeared", "busy"]) {
     f = fixture();
+    f.window.location.reload = () => { throw new Error("Unexpected reload"); };
     f.onTick(() => {
-      if (change === "stop") { f.api.state.running = false; f.api.state.runId += 1; }
-      if (change === "pause") { f.api.state.paused = true; f.onTick(() => { f.api.state.running = false; }); }
-      if (change === "navigate") f.window.location = new URL("https://chatgpt.com/c/another-agent");
-      if (change === "new-user") { f.newUser(); f.onTick(() => {}); }
+      if (change === "stop") { f.api.state.running = false; f.api.state.runId++; }
+      if (change === "navigate") f.window.location = new URL("https://chatgpt.com/c/another-chat");
+      if (change === "draft") f.composer.innerText = f.composer.textContent = "New draft";
       if (change === "notice-disappeared") f.hide();
+      if (change === "busy") f.setSelector("button[data-testid='stop-button']", [visibleElement()]);
     });
     await f.run();
     assert.deepEqual(f.sends, [], change);
-    assert.deepEqual(f.writes, [], change);
+    assert.equal(f.requests.some(r => r.type === "LR_PREPARE"), false, change);
   }
 
-  for (const change of ["draft", "replacement-composer", "new-user", "navigate", "busy"]) {
-    f = fixture();
-    f.setWriter((target, text) => {
-      target.innerText = target.textContent = change === "draft" ? "My replacement draft" : text;
-      f.setSelector("button[data-testid='send-button']", [f.send]);
-      if (change === "new-user") f.newUser();
-      if (change === "navigate") f.window.location = new URL("https://chatgpt.com/c/another-agent");
-      if (change === "busy") f.setSelector("button[data-testid='stop-button']", [visibleElement()]);
-      if (change === "replacement-composer") f.setSelector("#prompt-textarea", [visibleElement("Manual draft in a replacement editor")]);
-      return true;
-    });
-    await f.run();
-    assert.deepEqual(f.sends, [], `pre-send ${change} guard`);
-    assert.equal(f.api.state.error, true);
-    if (change === "draft") assert.equal(f.composer.innerText, "My replacement draft");
+  for (const condition of ["ready", "generating", "second-error", "wrong-user", "repeated-text", "missing-page", "draft", "unplanned-reload"]) {
+    f = fixture(); f.hide();
+    const settings = { message: "Configured followup", limit: 5, count: 3, rolloverEnabled: true, verifiedUser: true,
+      userHash: await f.api.reconnectUserHash({ element: f.user(), text: f.user().textContent }) };
+    f.api.state.running = false;
+    f.api.state.mode = "idle";
+    const runs = f.api.captureHeartbeatRunsForTest();
+    f.setRequestHandler(async r => r.type === "LR_CLAIM"
+      ? { ok: true, record: { token: "previous-run", attempted: true, requested: condition !== "unplanned-reload", settings } }
+      : { ok: true });
+    if (condition === "generating") f.setSelector("button[data-testid='stop-button']", [visibleElement()]);
+    if (condition === "second-error") f.setAlerts([visibleElement("Something went wrong. Please try again.")]);
+    if (condition === "wrong-user") f.newUser();
+    if (condition === "repeated-text") { const text = f.user().textContent; f.newUser(); f.user().textContent = f.user().innerText = text; }
+    if (condition === "missing-page") { f.setSelector("#prompt-textarea", []); f.api.setTimeoutSnapshotsForTest(() => ({ element: null, text: "" })); }
+    if (condition === "draft") f.composer.innerText = f.composer.textContent = "Draft";
+    await f.api.restoreLogicReconnect();
+    if (["ready", "generating"].includes(condition)) {
+      assert.equal(runs.length, 1, condition);
+      assert.equal(runs[0][1], true, "resume observes the current response without startup instructions");
+      assert.equal(f.api.state.count, 3, "the previous count is restored");
+    } else {
+      assert.equal(runs.length, 0, condition);
+      assert.equal(f.api.state.error, true, condition);
+      assert.equal(f.api.state.logicPhase, "recovery_paused", condition);
+    }
+    assert.deepEqual(f.sends, [], condition);
   }
-  console.log("delivery timeout tests passed");
+  for (const response of ["IDLE", "CONTINUE", "GENERATING"]) {
+    f = fixture(); f.hide();
+    f.assistant().textContent = f.assistant().innerText = `Recovered response.\n[[LOGIC:${response === "GENERATING" ? "IDLE" : response}]]`;
+    const settings = { message: "Configured followup", limit: 5, count: 3, rolloverEnabled: true, verifiedUser: true,
+      userHash: await f.api.reconnectUserHash({ element: f.user(), text: f.user().textContent }) };
+    f.api.state.running = false; f.api.state.mode = "idle";
+    f.setRequestHandler(async r => r.type === "LR_CLAIM"
+      ? { ok: true, record: { token: "restored-run", attempted: true, requested: true, settings } }
+      : { ok: true, enabled: false });
+    const runs = f.api.trackLogicRunsForTest();
+    if (response === "GENERATING") {
+      f.setSelector("button[data-testid='stop-button']", [visibleElement()]);
+      f.onTick(now => { if (now >= 10000) f.setSelector("button[data-testid='stop-button']", []); });
+    }
+    await f.api.restoreLogicReconnect();
+    assert.equal(runs.length, 1);
+    await runs[0];
+    assert.deepEqual(f.sends, response === "CONTINUE" ? ["Configured followup"] : [], response);
+    assert.equal(f.api.state.count, response === "CONTINUE" ? 4 : 3, response);
+    assert.equal(f.api.state.error, false, response);
+  }
+  console.log("timeout reconnection: empty page, one reload, ownership, no prompt replay, restored monitoring and visible failure passed");
 }
 if (require.main === module) runTests().catch(error => { console.error(error); process.exitCode = 1; });
 module.exports = { fixture };

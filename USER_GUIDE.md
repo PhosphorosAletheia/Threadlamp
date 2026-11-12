@@ -27,14 +27,30 @@ The assistant supplies these markers; they are not proof that its work is correc
 or that an external action is authorized. Review approvals and consequential work.
 Missing or invalid markers can pause automation for inspection.
 
-The follow-up limit includes automatic continuations, scheduled Status checks and
-timeout recovery messages. Startup, shutdown and manual messages are additional.
+The follow-up limit includes automatic continuations and scheduled Status checks. Startup, shutdown and manual messages are additional.
 Heartbeats begin new cycles with new counters. This is not a total token or cost cap.
 
 **Pause** holds automation and can be resumed. **Stop logic** ends Logic Mode and
 disables its schedule; when needed it waits for a free composer and sends a
 shutdown instruction. It does not cancel an answer ChatGPT is already generating.
 Stopping a sleeping chat does not send that shutdown message.
+
+## Delivery timeout recovery
+
+During an active Logic run, Threadlamp saves a temporary checkpoint for that tab
+and conversation. A delivery-timeout notice triggers a 30-second wait followed
+by at most one reload per run. It never clicks Retry or resends the failed prompt.
+
+After reload, it allows up to 60 seconds for the conversation to load and verifies
+the last user message by its message ID and a hash. It restores the message count
+and settings, monitors an ongoing response, or processes a completed response's
+Logic flag. The reload itself does not consume a follow-up.
+
+Another error, a missing or changed message, or a page that does not recover leaves
+Logic Mode visibly paused. Drafts and queued instructions also pause recovery so
+they are not lost. Stop cancels reconnection without sending a shutdown prompt.
+An unrelated page reload restores a recent checkpoint in a paused state for review.
+Checkpoints expire after ten minutes without updates and are not a permanent backup.
 
 ## Prompt queue
 

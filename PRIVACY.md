@@ -18,6 +18,7 @@ There is no extension-operated publisher telemetry, advertising or analytics ser
 | Pending prompt queues and drafts | Held in the tab; a pending rollover may temporarily carry queue data in extension session storage. |
 | Home Assistant address, notification action and access token | Stored locally only if configured; used to contact that service. |
 | Project server bindings, credentials, setup state and event identifiers | Stored locally if configured; used for pairing and routed event delivery. |
+| Logic reconnection checkpoints | Tab/conversation identity, follow-up settings and count, and a hash of the last user message ID and text are held in extension session storage. No transcript is saved; up to 100 recent checkpoints are retained and expire for recovery after ten minutes without updates. |
 | Pending phone actions and rollover records | Held in extension session storage, with some notification-routing metadata stored locally. |
 
 The dashboard does not archive complete conversation transcripts. Short excerpts
