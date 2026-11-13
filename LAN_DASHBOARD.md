@@ -55,6 +55,29 @@ and **Open settings on host** open those pages on that computer. Sound tests pla
 there too. Home Assistant and other connection credentials stay in extension
 settings; they are not editable through the LAN dashboard.
 
+## Install on Android
+
+The LAN dashboard includes an installable web app with a full-screen launch mode.
+Open its HTTPS address in Chrome on your Android device, sign in, then use
+**Settings → Install Threadlamp** in the dashboard. Installation is also available
+from the sign-in page. When Chrome does not offer a prompt, use its menu:
+**Add to Home screen → Install**. Launch Threadlamp from the new home-screen icon.
+
+The phone must trust the HTTPS certificate without a certificate warning. Merely
+bypassing a warning does not establish trusted HTTPS for installation. For a private
+certificate, verify its fingerprint on the host before installing trust on your
+phone; use your device's certificate settings. Never transfer `server-key.pem`,
+the extension pairing token, or the entire private helper directory to the phone.
+Browser/device support and access to a private LAN origin can affect installation;
+if only a browser shortcut is offered, it may not launch full screen. Android
+installation must be checked on your actual device.
+
+The app stays on your LAN and uses the same sign-in and session expiry as the
+browser dashboard. Chrome, the extension, and the helper still run on the host.
+It has no offline command queue, background sync, or service-worker cache of
+agent data. Restart the helper after updating its source, then reopen the app;
+reloading the extension is unnecessary for a helper-only update.
+
 ## Disconnect and recover
 
 - Choose **Sign out** on a shared device. Sessions expire after 12 hours and

@@ -24,6 +24,23 @@ test("LAN helper authenticates, restricts authority, and never replays uncertain
       const chunks=[];res.on("data",c=>chunks.push(c));res.on("end",()=>resolve({status:res.statusCode,headers:res.headers,text:Buffer.concat(chunks).toString()}));
     });request.on("error",reject);request.end(bytes);
   });
+  const publicLogin = await req("/login");
+  assert.match(publicLogin.text, /rel="manifest" href="\/app.webmanifest"/);
+  const metadata = await req("/app.webmanifest");
+  assert.equal(metadata.status, 200);
+  assert.match(metadata.headers["content-type"], /application\/manifest\+json/);
+  const app = JSON.parse(metadata.text);
+  assert.equal(app.display, "fullscreen"); assert.equal(app.start_url, "/"); assert.equal(app.scope, "/");
+  assert.deepEqual(app.icons.map(i => i.sizes), ["192x192", "512x512"]);
+  for (const icon of app.icons) {
+    const response = await req(icon.src);
+    assert.equal(response.status, 200); assert.equal(response.headers["content-type"], "image/png");
+    const bytes = fs.readFileSync(path.join(__dirname, "..", "assets", `icon-${icon.sizes.split("x")[0]}.png`));
+    assert.equal(bytes.readUInt32BE(16), Number(icon.sizes.split("x")[0]));
+    assert.equal(bytes.readUInt32BE(20), Number(icon.sizes.split("x")[1]));
+  }
+  assert.equal((await req("/install.js")).status, 200);
+  assert.equal((await req("/install.css")).status, 200);
   assert.equal((await req("/")).status,303);
   assert.equal((await req("/dashboard.js")).status,303);
   assert.equal((await req("/rpc",{type:"DB_LIST"})).status,401);
@@ -33,7 +50,7 @@ test("LAN helper authenticates, restricts authority, and never replays uncertain
   const login=await req("/login",{password}); assert.equal(login.status,200);
   assert.match(login.headers["set-cookie"][0],/HttpOnly; Secure; SameSite=Strict/);
   const cookie=login.headers["set-cookie"][0].split(";")[0];
-  const page=await req("/",undefined,cookie);assert.match(page.text,/src="\/lan-client.js"/);assert.match(page.headers["content-security-policy"],/frame-ancestors 'none'/);
+  const page=await req("/",undefined,cookie);assert.match(page.text,/src="\/lan-client.js"/);assert.match(page.text,/rel="manifest"/);assert.match(page.headers["content-security-policy"],/frame-ancestors 'none'/);
   assert.equal((await req("/helper/server.js",undefined,cookie)).status,404);
   assert.equal((await req("/config.json",undefined,cookie)).status,404);
   for(const type of ["HA_EXPORT_SETTINGS","HA_SAVE_SETTINGS","LAN_SAVE","DB_RECORD","SL_SETUP"]) {

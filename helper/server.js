@@ -12,9 +12,18 @@ const token = () => crypto.randomBytes(32).toString("base64url");
 const assets = new Map([
   ["/dashboard.js", ["dashboard.js", "text/javascript"]], ["/dashboard.css", ["dashboard.css", "text/css"]],
   ["/brand.css", ["brand.css", "text/css"]], ["/heartbeat.js", ["heartbeat.js", "text/javascript"]],
+  ["/app.webmanifest", ["helper/app.webmanifest", "application/manifest+json"]],
+  ["/install.js", ["helper/install.js", "text/javascript"]], ["/install.css", ["helper/install.css", "text/css"]],
+  ["/app-192.png", ["assets/icon-192.png", "image/png"]], ["/app-512.png", ["assets/icon-512.png", "image/png"]],
   ["/lan-client.js", ["helper/lan-client.js", "text/javascript"]],
   ["/login.js", ["helper/login.js", "text/javascript"]], ["/login.css", ["helper/login.css", "text/css"]]
 ]);
+// Installation metadata is public; dashboard data and controls still require a session.
+const publicAssets = new Set(["/login.js", "/login.css", "/app.webmanifest", "/install.js", "/install.css", "/app-192.png", "/app-512.png"]);
+function installableHtml(html) {
+  return html.replace(/initial-scale=1/, "initial-scale=1, viewport-fit=cover")
+    .replace("</head>", '<link rel="manifest" href="/app.webmanifest"><meta name="theme-color" content="#090506"><link rel="stylesheet" href="/install.css"><script defer src="/install.js"></script></head>');
+}
 const cookieName = "__Host-threadlamp";
 function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000} = {}) {
   const origin = new URL(config.origin);
@@ -103,19 +112,19 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000} = {}
       }
       if (req.method !== "GET") return reply(res, 405, {ok:false});
       if (url.pathname === "/login") {
-        res.writeHead(200, {...headers,"Content-Type":"text/html; charset=utf-8"}); return res.end(fs.readFileSync(path.join(__dirname,"login.html")));
+        res.writeHead(200, {...headers,"Content-Type":"text/html; charset=utf-8"}); return res.end(installableHtml(fs.readFileSync(path.join(__dirname,"login.html"),"utf8")));
       }
-      if (!["/login.js", "/login.css"].includes(url.pathname) && !session(req)) {
+      if (!publicAssets.has(url.pathname) && !session(req)) {
         res.writeHead(303, {...headers,Location:"/login"}); return res.end();
       }
       if (url.pathname === "/") {
         const html = fs.readFileSync(path.join(root,"dashboard.html"),"utf8")
           .replace('<script src="heartbeat.js">', '<script src="/lan-client.js"></script><script src="heartbeat.js">');
-        res.writeHead(200, {...headers,"Content-Type":"text/html; charset=utf-8"}); return res.end(html);
+        res.writeHead(200, {...headers,"Content-Type":"text/html; charset=utf-8"}); return res.end(installableHtml(html));
       }
       const asset = assets.get(url.pathname);
       if (!asset) return reply(res,404,{ok:false});
-      res.writeHead(200,{...headers,"Content-Type":asset[1]+"; charset=utf-8"}); res.end(fs.readFileSync(path.join(root,asset[0])));
+      res.writeHead(200,{...headers,"Content-Type":asset[1] + (asset[1].startsWith("image/") ? "" : "; charset=utf-8")}); res.end(fs.readFileSync(path.join(root,asset[0])));
     } catch { if (!res.headersSent) reply(res,400,{ok:false,error:"Invalid request."}); else res.destroy(); }
   });
   web.requestTimeout = 45000; web.headersTimeout = 10000; web.keepAliveTimeout = 5000; web.maxHeadersCount = 50;

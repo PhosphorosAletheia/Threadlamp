@@ -1,0 +1,8 @@
+/* Copyright (c) 2026 Phosphoros Research and contributors. SPDX-License-Identifier: MPL-2.0 */
+.lan-install { border-top: 1px solid #454545; margin-top: 24px; padding-top: 18px; }
+.lan-install h3 { font: inherit; font-weight: 600; margin: 0 0 12px; }
+.lan-install p { color: #b3b3b3; font-size: 13px; line-height: 1.5; margin: 12px 0 0; }
+.lan-install [hidden] { display: none !important; }
+@media (display-mode: fullscreen) {
+  body { box-sizing: border-box; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+}

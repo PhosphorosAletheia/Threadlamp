@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.14.0 beta 1
+
+- Add Android home-screen installation metadata and full-screen launch mode for
+  the LAN dashboard, with launcher icons and installation help.
+- Keep dashboard sign-in and command authorization unchanged; installation
+  assets contain no agent information and require no offline data cache.
+
 ## 1.13.1 beta 1
 
 - Recognize the message IDs in newer ChatGPT page layouts so Logic Mode can
