@@ -52,11 +52,11 @@ SPDX-License-Identifier: MPL-2.0 -->
         </div>
         <div class="panel-scroll"><section class="last-output" aria-labelledby="summary-title"><h3 id="summary-title">Last output summary</h3><p id="agent-summary">No summary yet. Enable summaries in Settings.</p><small id="agent-summary-meta"></small><p id="agent-summary-status" role="status"></p></section>
           <section id="panel-queue" role="tabpanel" aria-labelledby="tab-queue" tabindex="0" class="tool-panel">
-            <div class="panel-heading"><div><h3>Guide the next round</h3><p class="muted">Add instructions while your agent keeps working.</p></div><span class="panel-symbol" aria-hidden="true">↳</span></div>
+            <div class="panel-heading"><div><h3>Message queue</h3><p class="muted">Add instructions while your agent keeps working.</p></div><span class="panel-symbol" aria-hidden="true">↳</span></div>
             <div class="context-strip"><span class="status-dot"></span><p id="queue-state">No instructions queued.</p></div>
-            <form id="queue-form"><label for="queued">Next-round instructions</label><textarea id="queued" rows="6" maxlength="8000" placeholder="What should this agent focus on next?" aria-describedby="queue-help"></textarea><div class="editor-footer"><span id="queue-help">One pending prompt per agent.</span><span id="queued-count">0 / 8,000</span></div><div class="actions"><button data-action="queue" class="primary">Queue prompt <span aria-hidden="true">↗</span></button><button data-action="cancel_queue" class="quiet">Cancel queued prompt</button></div></form>
-            <details id="queue-preview" class="disclosure" hidden><summary>View currently queued prompt</summary><p id="queue-pending" class="preserve-text"></p></details>
-            <p class="footnote">Delivered on the next automatic send. Queueing does not approve a request or resume a paused agent.</p>
+            <form id="queue-form"><label for="queued">New message</label><textarea id="queued" rows="6" maxlength="8000" placeholder="What should this agent focus on next?" aria-describedby="queue-help"></textarea><div class="editor-footer"><span id="queue-help">Up to 100 messages · 8,000 characters each · 80,000 total.</span><span id="queued-count">0 / 8,000</span></div><div class="actions"><button data-action="queue" class="primary">Add to queue <span aria-hidden="true">↗</span></button><button data-action="cancel_queue" class="quiet">Clear queue</button></div></form>
+            <section id="queue-preview" hidden aria-label="Pending messages"><h4>Pending messages</h4><ol id="queue-pending" class="queue-list"></ol></section>
+            <p class="footnote">Messages are delivered in order, one per automatic round. Queueing does not approve a request or resume a paused agent.</p>
           </section>
           <section id="panel-reply" role="tabpanel" aria-labelledby="tab-reply" tabindex="0" class="tool-panel" hidden>
             <div class="panel-heading"><div><h3>Keep the work moving</h3><p class="muted">Respond when your agent needs a decision.</p></div></div>
@@ -86,7 +86,7 @@ SPDX-License-Identifier: MPL-2.0 -->
       <p id="broadcast-scope" class="muted"></p>
       <label for="broadcast-text">Instructions for the next round</label>
       <textarea id="broadcast-text" rows="6" maxlength="8000" aria-describedby="broadcast-help" placeholder="What should every agent know?" required></textarea>
-      <p id="broadcast-help" class="small muted">Added after existing queued instructions, within the 8,000-character limit. Agents use it on their next automatic send; this does not start or resume them.</p>
+      <p id="broadcast-help" class="small muted">Added as a separate message at the end of each queue. Agents use one message per automatic round; this does not start or resume them.</p>
       <div class="actions"><button id="broadcast-submit" type="submit" class="primary">Queue for all agents</button><button id="broadcast-new" type="button" hidden>New message</button></div>
       <p id="broadcast-status" role="status" aria-live="polite"></p>
       <ul id="broadcast-results" class="broadcast-results" aria-label="Queue results"></ul>

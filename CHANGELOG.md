@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.12.0 beta 1
+
+- Queue multiple messages without replacing unsent entries. Send them in order,
+  one per automatic round, with up to 100 messages and 80,000 characters per chat.
+- Show pending messages inline in the dashboard and page controls, with individual
+  removal, a queue count, and a clear-queue action.
+- Add broadcasts as separate queue entries and preserve drafts while queueing.
+- Carry remaining entries through verified project handoffs and delayed new-chat
+  URL changes. An uncertain send consumes only the attempted entry.
+
 ## 1.11.0 beta 1
 
 - Add a Message all agents popup to queue shared instructions across connected agents.

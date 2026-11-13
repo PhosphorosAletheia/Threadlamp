@@ -11,7 +11,7 @@
   const locks = new Set();
   let historyQueue = Promise.resolve();
   const pageActions = new Set(["start_loop", "stop", "start_logic", "resume_logic", "pause", "resume",
-    "next_cycle", "queue", "queue_append", "cancel_queue", "continue", "status", "reply", "approve"]);
+    "next_cycle", "queue", "queue_append", "remove_queue", "cancel_queue", "continue", "status", "reply", "approve"]);
   const limit = (value, size) => String(value || "").slice(0, size);
   const projectName = value => {
     const name = limit(value, 200).replace(/\s+/g, " ").trim();

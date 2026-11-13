@@ -109,7 +109,7 @@ async function decoratedQueueTests() {
   assert.equal(shadow.querySelector(".queue-prompt").disabled, false);
   shadow.querySelector(".queue-prompt").handlers.click();
   assert.equal(input.value, "");
-  assert.match(shadow.querySelector(".queue-note").textContent, /Queued: Focus on costs/);
+  assert.match(shadow.querySelector(".queue-note").textContent, /1 queued/);
   assert.equal(shadow.querySelector(".cancel-prompt").hidden, false);
   input.value = "Unfinished draft for another round";
   let focusRestored = 0, isolatedKeys = 0;
@@ -129,13 +129,13 @@ async function decoratedQueueTests() {
   assert.equal(f.api.state.count, 2, "extra instructions do not create an extra turn");
   assert.equal(focusRestored, 2, "each automatic composer write returns focus to the banner draft");
 
-  f = normal();
+  f = normal(["continue", "idle"]);
   assert.equal(f.api.queueAdditionalPrompt("   "), false);
   assert.equal(f.api.queueAdditionalPrompt("x".repeat(8001)), false);
   assert.equal(f.api.queueAdditionalPrompt("First"), true);
-  assert.equal(f.api.queueAdditionalPrompt("Replacement"), true);
+  assert.equal(f.api.queueAdditionalPrompt("Second"), true);
   await f.run();
-  assert.deepEqual(f.sends, [combined("Configured followup", "Replacement")]);
+  assert.deepEqual(f.sends, [combined("Configured followup", "First"), combined("Configured followup", "Second")]);
 
   f = normal();
   f.api.queueAdditionalPrompt("Cancelled");
@@ -197,7 +197,8 @@ async function decoratedQueueTests() {
         if (change === "stop") { f.api.state.logicPhase = "sleeping"; f.api.stopLogicMode(); }
         if (change === "lock") {
           assert.equal(f.api.cancelAdditionalPrompt(), false);
-          assert.equal(f.api.queueAdditionalPrompt("Replacement too late"), false);
+          assert.equal(f.api.queueAdditionalPrompt("Later entry"), true);
+          assert.equal(f.api.removeAdditionalPrompt(f.api.getQueuedPromptForTest().id), false);
         }
         return true;
       });
@@ -206,6 +207,7 @@ async function decoratedQueueTests() {
     if (change === "lock") assert.deepEqual(f.sends, [combined("Configured followup", "One-time instructions")]);
     else assert.deepEqual(f.sends, [], change);
     if (["navigate", "manual"].includes(change)) assert.equal(f.api.getQueuedPromptForTest().text, "One-time instructions");
+    else if (change === "lock") assert.equal(f.api.getQueuedPromptForTest().text, "Later entry");
     else assert.equal(f.api.getQueuedPromptForTest(), null);
   }
 
@@ -234,6 +236,40 @@ async function decoratedQueueTests() {
   assert.equal(f.api.queueAdditionalPrompt("Late change"), false);
   assert.equal(f.api.cancelAdditionalPrompt(), false);
 
+  // Stable IDs allow removing a middle entry without changing the others.
+  f = normal(["continue", "idle"]);
+  for (const text of ["First", "Remove me", "Third"]) f.api.queueAdditionalPrompt(text);
+  const middle = f.api.getQueuedPromptsForTest()[1].id;
+  assert.equal(f.api.removeAdditionalPrompt(middle), true);
+  assert.equal(f.api.removeAdditionalPrompt(middle), false);
+  await f.run();
+  assert.deepEqual(f.sends, [combined("Configured followup", "First"), combined("Configured followup", "Third")]);
+
+  // Failed preparation preserves every entry; an attempted send consumes just
+  // the first, even if clicking Send throws before delivery can be confirmed.
+  for (const attempted of [false, true]) {
+    f = normal();
+    f.api.queueAdditionalPrompt("First"); f.api.queueAdditionalPrompt("Second");
+    if (attempted) f.send.click = () => { throw new Error("Uncertain delivery"); };
+    else f.setWriter((target, text) => { target.innerText = target.textContent = "Manual edit"; return true; });
+    await f.run();
+    assert.deepEqual(Array.from(f.api.getQueuedPromptsForTest(), item => item.text), attempted ? ["Second"] : ["First", "Second"]);
+  }
+  f = normal();
+  for (let i = 0; i < 100; i++) assert.equal(f.api.queueAdditionalPrompt(`Message ${i}`), true);
+  assert.equal(f.api.queueAdditionalPrompt("Overflow"), false);
+  assert.equal(f.api.getQueuedPromptsForTest().length, 100);
+  f.api.cancelAdditionalPrompt();
+  for (let i = 0; i < 10; i++) assert.equal(f.api.queueAdditionalPrompt("x".repeat(8000)), true);
+  assert.equal(f.api.queueAdditionalPrompt("Overflow"), false);
+  assert.equal(f.api.getQueuedPromptsForTest().length, 10);
+  // IDs and size constraints are checked when a persisted handoff is claimed.
+  for (const queuedPrompts of [null, {}, [{id:"a",text:""}], [{id:"a",text:"x"},{id:"a",text:"y"}],
+    [{id:"a",text:"x".repeat(8001)}], Array.from({length:101}, (_,i) => ({id:`q-${i}`,text:"x"})),
+    Array.from({length:11}, (_,i) => ({id:`q-${i}`,text:"x".repeat(8000)}))]) {
+    assert.equal(f.api.normalizeQueuedPrompts({queuedPrompts}), null);
+  }
+
   const rollover = contentHarness();
   const project = "g-p-0123456789abcdef0123456789abcdef-job-search";
   rollover.window.location = new URL(`https://chatgpt.com/g/${project}`);
@@ -244,5 +280,9 @@ async function decoratedQueueTests() {
   assert.equal(runs.length, 1);
   assert.equal(rollover.api.getQueuedPromptForTest().text, "Carried once");
   assert.equal(rollover.api.getQueuedPromptForTest().url, rollover.window.location.href);
+  await rollover.api.startClaimedLogicRollover({ previousTitle: "Old chat", projectSegment: project,
+    message: "Continue", limit: 5, count: 1, queuedPrompts: [{id:"first",text:"First"},{id:"second",text:"Second"}] });
+  assert.deepEqual(Array.from(rollover.api.getQueuedPromptsForTest(), item => [item.id,item.text,item.url]),
+    [["first","First",rollover.window.location.href],["second","Second",rollover.window.location.href]]);
   console.log("queued prompt tests passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

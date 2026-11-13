@@ -14,11 +14,11 @@ const root = path.resolve(__dirname, "..");
 for (const file of ["dashboard.css", "brand.css", "dashboard.js", "heartbeat.js"]) fs.copyFileSync(path.join(root, file), path.join(output, file));
 function mock() {
   const actions = [];
-  let uncertainBroadcast = false;
+  let uncertainBroadcast = false, onQueueRequest = null;
   const caps = { start_loop: false, start_logic: false, resume_logic: false, stop: true, pause: true, resume: false,
-    next_cycle: false, queue: true, queue_append: true, cancel_queue: false, continue: false, status: false, reply: false, approve: false };
+    next_cycle: false, queue: true, queue_append: true, remove_queue: true, cancel_queue: false, continue: false, status: false, reply: false, approve: false };
   const base = { online: true, revision: "1", mode: "logic", logicPhase: "monitoring", running: true, count: 2, limit: 10,
-    message: "Continue", rolloverEnabled: true, lastSeen: Date.now(), queuedPrompt: "", capabilities: caps };
+    message: "Continue", rolloverEnabled: true, lastSeen: Date.now(), queuedPrompt: "", queuedPrompts: [], queueLimits:{items:100,total:80000}, capabilities: caps };
   const agents = [
     { ...base, tabId: 17, instanceId: "research", title: "Product Research", chatTitle: "Competitive landscape & source review", url: "https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef-research/c/research", detail: "Reviewing source material. Waiting for the response…" },
     { ...base, tabId: 18, instanceId: "build", title: "Agent Dashboard", chatTitle: "Controls & notifications", url: "https://chatgpt.com/c/build", detail: "Logic Mode paused. Choose the next milestone.", userInputBrief: "Choose the next milestone: controls or notifications?", logicPhase: "waiting_user", capabilities: { ...caps, reply: true, approve: true } },
@@ -33,7 +33,7 @@ function mock() {
   const configuration = { kind: "interval", intervalMinutes: 60, times: [], days: [], timeZone: "America/Chicago", prompt: "Check the next scheduled tasks.", limit: 5, phase: "sleeping", detail: "Waiting for next cycle." };
   globalThis.chrome = {
     runtime: { openOptionsPage: async () => {}, sendMessage: async request => {
-      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.10.0" });
+      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.12.0" });
       if (request.type === "DB_INSPECT") return { ok: true, schedule: configuration, connection: null, defaultPrompt: "Do the scheduled work." };
       if (request.type === "ALERT_GET_SETTINGS") return { soundEnabled: true };
       if (request.type === "HA_GET_SETTINGS") return { enabled: true, connection: { phase: "connected" }, approvalMessage: "Approved. Continue with the current task." };
@@ -42,14 +42,20 @@ function mock() {
       if (request.type === "DB_COMMAND") {
         actions.push(request);
         const agent = agents.find(a => a.tabId === request.target.tabId);
-        if (request.action === "queue_append") {
-          agent.queuedPrompt = (agent.queuedPrompt ? agent.queuedPrompt + "\n\n" : "") + request.payload.text;
-          if (uncertainBroadcast && agent.tabId === 18) return {ok:false, uncertain:true};
+        if (["queue", "queue_append"].includes(request.action)) {
+          if (onQueueRequest && request.action === "queue") { const callback = onQueueRequest; onQueueRequest = null; callback(); }
+          agent.queuedPrompts = [...agent.queuedPrompts, {id:crypto.randomUUID(),text:request.payload.text}];
+          agent.queuedPrompt = agent.queuedPrompts[0]?.text || "";
+          agent.capabilities = {...agent.capabilities, cancel_queue:true};
+          if (request.action === "queue_append" && uncertainBroadcast && agent.tabId === 18) return {ok:false, uncertain:true};
         }
-        if (request.action === "queue") { agent.queuedPrompt = request.payload.text; agent.capabilities = { ...agent.capabilities, cancel_queue: true }; }
+        if (request.action === "remove_queue") {
+          agent.queuedPrompts = agent.queuedPrompts.filter(item => item.id !== request.payload.id);
+          agent.queuedPrompt = agent.queuedPrompts[0]?.text || "";
+        }
         if (request.action === "pause") { agent.paused = true; agent.capabilities = { ...agent.capabilities, pause: false, resume: true }; }
         if (request.action === "resume") { agent.paused = false; agent.capabilities = { ...agent.capabilities, pause: true, resume: false }; }
-        if (request.action === "cancel_queue") { agent.queuedPrompt = ""; agent.capabilities = { ...agent.capabilities, cancel_queue: false }; }
+        if (request.action === "cancel_queue") { agent.queuedPrompts = []; agent.queuedPrompt = ""; agent.capabilities = { ...agent.capabilities, cancel_queue: false }; }
         return { ok: true };
       }
       return { ok: true };
@@ -99,8 +105,20 @@ function mock() {
       input("queued", "Review edge cases before the next round.");
       click("[data-action='queue']"); await wait();
       assert(actions.at(-1).target.tabId === 17 && actions.at(-1).payload.text.startsWith("Review edge"), "Queue targets selected agent");
-      assert($("queue-pending").textContent.includes("Review edge"), "Queued prompt visible in disclosure");
+      assert($("queue-pending").textContent.includes("Review edge"), "Queued message visible inline");
       assert(!$("queue-badge").hidden, "Pending queue badge");
+      assert($("queued").value === "", "Adding clears only the composer");
+      onQueueRequest = () => input("queued", "Typed while command is pending");
+      input("queued", "Pending command message"); click("[data-action='queue']"); await wait();
+      assert($("queued").value === "Typed while command is pending", "Typing during enqueue survives completion");
+      $("queue-pending").querySelectorAll("button")[1].click(); await wait();
+      assert($("queued").value === "Typed while command is pending", "Removing a message preserves the editor draft");
+      input("queued", "Second instruction"); click("[data-action='queue']"); await wait();
+      input("queued", "Third instruction <img src=x onerror=alert(1)>"); click("[data-action='queue']"); await wait();
+      assert(agents[0].queuedPrompts.length === 3 && $("queue-badge").textContent === "3", "Adds preserve three ordered entries");
+      assert(!$("queue-pending").querySelector("img"), "Queued text never becomes HTML");
+      $("queue-pending").querySelectorAll("button")[1].click(); await wait();
+      assert(agents[0].queuedPrompts.length === 2 && agents[0].queuedPrompts[1].text.startsWith("Third"), "Remove deletes only its entry");
       input("queued", "Unsent dashboard draft");
       tab("run"); tab("queue");
       click("#refresh"); await wait();
@@ -168,13 +186,13 @@ function mock() {
       assert($("broadcast-scope").textContent.startsWith("3 connected"), "Recipients include filtered agents but exclude offline history");
       const beforeBroadcast = actions.length;
       input("broadcast-text", "Shared instructions <do not render as HTML>");
-      const firstQueue = agents[0].queuedPrompt;
+      const firstQueue = agents[0].queuedPrompts.slice();
       click("#broadcast-submit");
       $("broadcast-form").dispatchEvent(new Event("submit", {bubbles:true, cancelable:true}));
       await wait();
       assert(actions.length === beforeBroadcast + 3, "One append per connected agent despite double submit");
       assert(actions.slice(-3).every(a => a.action === "queue_append"), "Broadcast only uses append queues");
-      assert(agents[0].queuedPrompt === firstQueue + "\n\nShared instructions <do not render as HTML>", "Existing queue preserved");
+      assert(JSON.stringify(agents[0].queuedPrompts.slice(0,-1)) === JSON.stringify(firstQueue) && agents[0].queuedPrompts.at(-1).text === "Shared instructions <do not render as HTML>", "Existing queue preserved");
       assert($("broadcast-status").textContent.includes("Queued: 3"), "Success count is visible");
       assert($("queued").value === "Unsent dashboard draft", "Broadcast preserves per-agent editor drafts");
       click('[data-close="broadcast-dialog"]');
@@ -189,16 +207,16 @@ function mock() {
       assert($("broadcast-status").textContent === "Queued: 1. Skipped: 1. Not queued: 0. Unconfirmed: 1.", "Partial and uncertain outcomes are reported separately");
       assert(actions.length === beforeBroadcast + 5, "Changed conversation skipped; uncertain dispatch never retried");
       agents[2].url = priorUrl; uncertainBroadcast = false;
-      const savedQueue = agents[2].queuedPrompt, savedCaps = agents[1].capabilities;
-      agents[2].queuedPrompt = "x".repeat(8000);
+      const savedQueue = agents[2].queuedPrompts, savedCaps = agents[1].capabilities;
+      agents[2].queuedPrompts = Array.from({length:100}, (_,i) => ({id:`full-${i}`,text:"Pending"}));
       agents[1].capabilities = {...savedCaps, queue_append:false};
       agents.push({...agents[0], tabId:21, instanceId:"duplicate"});
       click("#refresh"); await wait(); click("#broadcast-new");
       input("broadcast-text", "One copy per conversation");
       click("#broadcast-submit"); await wait();
       assert($("broadcast-status").textContent === "Queued: 1. Skipped: 3. Not queued: 0. Unconfirmed: 0.", "Duplicate conversations, full queues and unavailable agents are skipped");
-      assert(agents[2].queuedPrompt.length === 8000, "A full queue is never overwritten");
-      agents.pop(); agents[2].queuedPrompt = savedQueue; agents[1].capabilities = savedCaps;
+      assert(agents[2].queuedPrompts.length === 100, "A full queue is never overwritten");
+      agents.pop(); agents[2].queuedPrompts = savedQueue; agents[1].capabilities = savedCaps;
       click('[data-close="broadcast-dialog"]');
       change("filter", "all"); await select(17); tab("queue");
       const originalTitle = agents[0].title, originalDetail = agents[0].detail;
@@ -220,10 +238,11 @@ function mock() {
         assert(queueButton.bottom <= document.querySelector(".app-status").getBoundingClientRect().top, "Primary queue action is above the fold on laptop screens");
       }
       assert(errors.length === 0, errors.join("; "));
-      const report = document.createElement("pre"); report.id = "smoke-result"; report.textContent = "PASS: project selection, priority ordering, tabs, keyboard, queue, broadcasts, partial results, deduplication, reply, approvals, pause/resume, heartbeat, activity filters, dialogs, focus, offline guards, draft retention, viewport layout; no browser errors";
+      const report = document.createElement("pre"); report.id = "smoke-result"; report.textContent = "PASS: multi-entry add/remove, literal text rendering, project selection, priority ordering, tabs, keyboard, queue, broadcasts, partial results, deduplication, reply, approvals, pause/resume, heartbeat, activity filters, dialogs, focus, offline guards, draft retention, viewport layout; no browser errors";
       report.hidden = true; document.body.append(report);
       // Optional screenshot views use the same tested mock, never real chats.
       const preview = new URLSearchParams(location.search).get("preview");
+      if (preview === "queue") $("queue-preview").scrollIntoView({block:"start"});
       if (preview === "reply") await select(18);
       if (preview === "broadcast") { if (innerWidth <= 720 && document.body.dataset.mobileView !== "agents") click("#back-to-agents"); click("#broadcast-open"); click("#broadcast-new"); input("broadcast-text", "Please include a brief progress summary in your next response."); }
       if (preview === "activity") click("#activity-toggle");

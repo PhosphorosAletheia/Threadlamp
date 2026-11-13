@@ -18,6 +18,8 @@
     : ["sleeping", "waiting_external"].includes(agent.logicPhase) ? 4 : agent.running && !agent.paused ? 2 : 3;
   const orderedAgents = () => [...agents].sort((a, b) => priority(a) - priority(b) || a.title.localeCompare(b.title) || a.tabId - b.tabId);
   const key = agent => `${agent.tabId}:${agent.instanceId || "offline"}:${agent.url}`;
+  const queueItems = agent => Array.isArray(agent.queuedPrompts) ? agent.queuedPrompts
+    : agent.queuedPrompt ? [{id: "", text: agent.queuedPrompt}] : [];
   const selected = () => agents.find(agent => key(agent) === selectedKey);
   const target = agent => ({ tabId: agent.tabId, url: agent.url, instanceId: agent.instanceId, revision: agent.revision });
   const time = at => at ? new Date(at).toLocaleString() : "—";
@@ -125,7 +127,7 @@
     $("message").value = state["run-form"]?.values.message ?? agent.message ?? "Continue";
     $("limit").value = state["run-form"]?.values.limit ?? agent.limit ?? 5;
     $("rollover").checked = state["run-form"]?.values.rollover ?? agent.rolloverEnabled ?? true;
-    $("queued").value = state["queue-form"]?.values.queued ?? agent.queuedPrompt ?? "";
+    $("queued").value = state["queue-form"]?.values.queued ?? "";
     $("reply").value = state["reply-form"]?.values.reply ?? "";
     showPanel(panels.get(selectedKey) || (agent.logicPhase === "waiting_user" ? "reply" : "queue"));
     renderAgents(); renderDetail(); renderEvents(); void inspect();
@@ -154,10 +156,30 @@
     $("agent-guard").textContent = !agent.online ? "Controls are disabled until this page connects."
       : agent.hasDraft ? "A manual draft is present. It will be preserved."
       : agent.generating ? "ChatGPT is responding. Immediate sends are unavailable; you can queue instructions." : "";
-    $("queue-state").textContent = agent.queuedPrompt ? "1 prompt queued for the next automatic send." : agent.queueNote || "No instructions queued. Your next prompt goes here.";
-    $("queue-pending").textContent = agent.queuedPrompt || "";
-    $("queue-preview").hidden = !agent.queuedPrompt;
-    $("queue-badge").hidden = !agent.queuedPrompt;
+    const items = queueItems(agent);
+    $("queue-state").textContent = items.length ? `${items.length} queued · One message per automatic round.` : agent.queueNote || "No messages queued. Add your next message below.";
+    if (agent.online && !Array.isArray(agent.queuedPrompts)) $("queue-state").textContent = "Refresh this chat to use multiple queued messages.";
+    $("queue-preview").hidden = !items.length;
+    $("queue-badge").hidden = !items.length;
+    $("queue-badge").textContent = items.length;
+    const queueFingerprint = JSON.stringify([key(agent), items, busy, agent.online, agent.capabilities?.remove_queue]);
+    if ($("queue-pending").queueFingerprint !== queueFingerprint) {
+      $("queue-pending").queueFingerprint = queueFingerprint;
+      $("queue-pending").replaceChildren(...items.map((item, index) => {
+        const row = el("li", undefined, "queue-item");
+        const copy = el("div");
+        copy.append(el("strong", `${index + 1}${index === 0 ? " · Next" : ""}${item.preparing ? " · Preparing…" : ""}`), el("p", item.text, "preserve-text"));
+        const remove = el("button", "Remove", "quiet");
+        remove.type = "button";
+        remove.setAttribute("aria-label", `Remove queued message ${index + 1}`);
+        remove.disabled = busy || !agent.online || !agent.capabilities?.remove_queue || item.preparing || !item.id;
+        remove.addEventListener("click", () => {
+          const current = selected();
+          if (current && key(current) === key(agent)) void act(current, "remove_queue", {id: item.id}, target(current));
+        });
+        row.append(copy, remove); return row;
+      }));
+    }
     $("reply-badge").hidden = !(agent.online && agent.logicPhase === "waiting_user");
     $("review-input").hidden = $("reply-badge").hidden;
     $("input-brief").textContent = agent.logicPhase === "waiting_user" ? agent.userInputBrief || "The agent is waiting. Review its request in ChatGPT before replying." : "No active input request.";
@@ -169,6 +191,7 @@
       else if (action.startsWith("server_")) allowed &&= /\/g\/g-p-/.test(agent.url) && Boolean(Heartbeat.canonicalUrl(agent.url)) && inspectedKey === selectedKey
         && (["server_setup", "server_recover"].includes(action) || Boolean(connection));
       else allowed &&= Boolean(agent.capabilities?.[action]);
+      if (action === "queue") allowed &&= Array.isArray(agent.queuedPrompts);
       button.disabled = busy || !allowed;
       button.title = !allowed ? "Unavailable in the agent's current state. Review its status above." : "";
       if (button.closest(".run-actions")) button.hidden = action === "resume" ? !agent.paused
@@ -176,7 +199,7 @@
     }
     $("open-chat").disabled = !agent.online;
     const state = formState();
-    if (!state["queue-form"] && document.activeElement !== $("queued")) $("queued").value = agent.queuedPrompt || "";
+    if (!state["queue-form"] && document.activeElement !== $("queued")) $("queued").value = "";
     $("queued-count").textContent = `${$("queued").value.length.toLocaleString()} / 8,000`;
   }
   async function inspect() {
@@ -300,10 +323,16 @@
       const seen = new Set();
       const work = broadcastRecipients.map(recipient => {
         const agent = current.find(a => key(a) === key(recipient) && a.online);
-        let reason = !agent ? "Disconnected or changed conversation." : !agent.capabilities?.queue_append ? "Queue unavailable in this agent's current state or version." : "";
+        let reason = !agent ? "Disconnected or changed conversation." : !agent.capabilities?.queue_append || !Array.isArray(agent.queuedPrompts) ? "Queue unavailable in this agent's current state or version." : "";
         const identity = agent && Heartbeat.chatKey(agent.url);
         if (!reason && identity && seen.has(identity)) reason = "Duplicate conversation; included through another tab.";
-        if (!reason && (agent.queuedPrompt ? agent.queuedPrompt.length + 2 : 0) + text.length > 8000) reason = "Combined queue exceeds 8,000 characters; existing instructions preserved.";
+        if (!reason) {
+          const items = queueItems(agent), limits = agent.queueLimits;
+          if (limits ? items.length >= limits.items || items.reduce((sum, item) => sum + item.text.length, 0) + text.length > limits.total
+            : (agent.queuedPrompt ? agent.queuedPrompt.length + 2 : 0) + text.length > 8000) {
+            reason = "Queue is full; existing messages preserved.";
+          }
+        }
         if (!reason && identity) seen.add(identity);
         return {recipient, agent, reason, commandId: crypto.randomUUID()};
       });
@@ -352,7 +381,7 @@
     button.type = "button";
     button.addEventListener("click", async () => {
       const agent = selected(); if (!agent) return;
-      const action = button.dataset.action, form = action === "approve" ? null : button.closest("form");
+      const action = button.dataset.action, form = ["approve", "cancel_queue"].includes(action) ? null : button.closest("form");
       const draft = form && formState()[form.id];
       const expected = draft?.target || target(agent);
       let payload = {};
@@ -372,8 +401,10 @@
         const done = await act(agent, action, payload, expected);
         if (done) {
           const saved = drafts.get(actionKey);
-          if (form && saved) delete saved[form.id];
-          if (action === "cancel_queue" && saved) delete saved["queue-form"];
+          const queueEditedDuringRequest = action === "queue" && saved?.["queue-form"] !== draft;
+          if (form && saved && !queueEditedDuringRequest) delete saved[form.id];
+          if (queueEditedDuringRequest && saved?.["queue-form"]) saved["queue-form"].target = target(agents.find(a => key(a) === actionKey) || agent);
+          if (action === "queue" && selectedKey === actionKey && !queueEditedDuringRequest) $("queued").value = "";
           if (action === "reply" && selectedKey === actionKey) $("reply").value = "";
           renderDetail();
         } else if (draft) {

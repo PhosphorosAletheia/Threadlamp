@@ -87,6 +87,10 @@ const { visibleElement } = require("./rollover.test.js");
     const saved = `https://chatgpt.com/g/${project}/c/saved`;
     f.window.location = new URL(scenario === "saved-to-saved" ? saved + "-original"
       : scenario === "local" ? `https://chatgpt.com/g/${project}/c/local-chatgpt:temporary` : home);
+    if (scenario === "local") {
+      assert.equal(f.api.queueAdditionalPrompt("First queued"), true);
+      assert.equal(f.api.queueAdditionalPrompt("Second queued"), true);
+    }
     let absent = false;
     f.api.setTimeoutSnapshotsForTest(role => {
       if (!f.sends.length || absent) return {element:null, text:""};
@@ -133,7 +137,10 @@ const { visibleElement } = require("./rollover.test.js");
     await f.api.runLogicMode(1, false, "Initial continuation", "Starting", scenario === "handoff"
       ? {failureId:"receipt", projectSegment:project, sourceUrl:`https://chatgpt.com/g/${project}/c/source`} : null);
     const allowed = ["delayed", "long-delay", "local", "render-late", "handoff"].includes(scenario);
-    assert.deepEqual(f.sends, allowed ? ["Initial continuation", "Configured followup"] : ["Initial continuation"], scenario);
+    const expected = scenario === "local" ? ["Initial continuation\n\nAdditional instructions from the user for this round:\nFirst queued",
+      "Configured followup\n\nAdditional instructions from the user for this round:\nSecond queued"]
+      : allowed ? ["Initial continuation", "Configured followup"] : ["Initial continuation"];
+    assert.deepEqual(f.sends, expected, scenario);
     if (scenario !== "cancelled") assert.equal(f.api.state.error, !allowed, scenario);
     if (scenario === "handoff") assert.equal(f.requests.filter(r => r.type === "LOGIC_ROLLOVER_COMPLETE").length, 1);
   }

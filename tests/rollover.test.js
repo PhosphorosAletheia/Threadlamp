@@ -36,7 +36,10 @@ function exposeContentFunctions(source) {
       updateOverlay,
       updateQuickActions,
       getOverlayForTest() { return overlayHost; },
-      getQueuedPromptForTest() { return queuedPrompt; },
+      getQueuedPromptForTest() { return queuedPrompts[0] || null; },
+      removeAdditionalPrompt,
+      getQueuedPromptsForTest() { return queuedPrompts; },
+      normalizeQueuedPrompts,
       submitMessage,
       sendQuickPrompt,
       startClaimedLogicRollover,
@@ -216,6 +219,8 @@ function contentHarness(timing = {}) {
         querySelectorAll: () => [],
         querySelector: selector => {
           if (!nodes.has(selector)) nodes.set(selector, {
+          children: [],
+          replaceChildren(...children) { this.children = children; },
           handlers: {},
           value: "",
           addEventListener(type, fn) { this.handlers[type] = fn; },
@@ -229,6 +234,10 @@ function contentHarness(timing = {}) {
         }
       };
       const element = {
+        children: [], handlers: {},
+        append(...children) { this.children.push(...children); },
+        addEventListener(type, fn) { this.handlers[type] = fn; },
+        setAttribute() {},
         id: "",
         style: {},
         isConnected: false,
@@ -850,7 +859,18 @@ async function testBackgroundRolloverBinding() {
   await assert.rejects(() => api.prepareLogicRollover({
     projectSegment: project, previousTitle: "Previous chat", message: "Continue",
     queuedPrompt: "x".repeat(8001), limit: 8, count: 3
-  }, sender), /queued prompt is too long/);
+  }, sender), /queued messages are invalid/);
+
+  const orderedQueue = [{id:"first",text:"First"},{id:"second",text:"Second"}];
+  const multi = await api.prepareLogicRollover({ projectSegment: project, previousTitle: "Old chat", message: "Continue",
+    queuedPrompts: orderedQueue, limit:8, count:3 }, sender);
+  const multiClaim = await api.claimLogicRollover({requestId:multi.requestId}, {...sender, tab:{id:17,url:destinationUrl}});
+  assert.equal(JSON.stringify(multiClaim.pending.queuedPrompts), JSON.stringify(orderedQueue));
+  for (const queuedPrompts of [null, [{id:"a",text:"x"},{id:"a",text:"y"}], [{id:"a",text:"x".repeat(8001)}],
+    Array.from({length:101}, (_,i) => ({id:`q-${i}`,text:"x"})), Array.from({length:11}, (_,i) => ({id:`q-${i}`,text:"x".repeat(8000)}))]) {
+    await assert.rejects(api.prepareLogicRollover({projectSegment:project, previousTitle:"Old chat", message:"Continue",
+      queuedPrompts, limit:8, count:3}, sender), /queued messages are invalid/);
+  }
 
   await api.prepareLogicRollover({
     projectSegment: project,

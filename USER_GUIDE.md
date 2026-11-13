@@ -54,15 +54,21 @@ Checkpoints expire after ten minutes without updates and are not a permanent bac
 
 ## Prompt queue
 
-Use **Show prompt** on the page or **Prompt queue** in the dashboard. A queued
-instruction is appended once to the next eligible automatic turn. Typing alone
-does not enqueue it. Replace or cancel the pending instruction before sending.
+Use **Show prompt** on the page or **Prompt queue** in the dashboard. Type a
+message and click **Add to queue**. Each click adds a separate entry without
+replacing earlier messages. The list shows pending messages in order; use
+**Remove** beside an entry or **Clear queue** to remove them all.
 
-Each chat has one queue, up to 8,000 characters. Queueing does not override Pause,
-approve an input request, or bypass the follow-up limit. Stop discards the queue;
-refreshing a tab or reloading the extension loses in-tab drafts and queues.
-After a send attempt with uncertain delivery, the queued text is not replayed
-automatically.
+One queued message is appended to each eligible automatic turn. You can keep
+adding messages while an earlier one is being prepared, but that entry cannot
+be removed once preparation begins. Each chat supports up to 100 messages,
+8,000 characters per message, and 80,000 characters across the queue.
+
+Queueing does not override Pause, approve an input request, or bypass the
+follow-up limit. Remaining entries carry into a verified new-chat handoff.
+Stop discards the queue; refreshing a tab or reloading the extension loses
+in-tab drafts and queues. After a send attempt with uncertain delivery, that
+entry is not replayed automatically; later entries remain queued for review.
 
 ## Dashboard
 
@@ -73,14 +79,14 @@ Chats in one project remain separate targets. Offline or changed chats may requi
 a refresh of dashboard status before controls can proceed.
 
 Use **Message all agents** above the agent list to open a shared message box.
-**Queue for all agents** appends the text after existing instructions in each
-connected agent's next-message queue, including agents hidden by search or filters.
+**Queue for all agents** adds a separate message at the end of each connected
+agent's queue, including agents hidden by search or filters.
 The recipient list is fixed when you open the popup; newly connected chats are not
 added while you type. This queues instructions without starting or resuming agents.
 
 The popup lists each outcome. Offline agents are excluded; unavailable queues,
 changed conversations, duplicate tabs for the same conversation, and queues that
-would exceed 8,000 characters are skipped or rejected. Inspect any unconfirmed
+would exceed their message or character limits are skipped or rejected. Inspect any unconfirmed
 queue before retrying that agent individually. Reopening the popup shows the last
 results; choose **New message** to compose another broadcast. Dashboard edits that
 have not been queued remain in their individual editors.

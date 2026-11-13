@@ -775,7 +775,16 @@ async function prepareLogicRolloverLocked(request, sender) {
 
   if (!previousTitle) throw new Error("The previous conversation title could not be determined.");
   if (!message || message.length > 4000) throw new Error("The continuation message is invalid.");
-  if (queuedPrompt.length > 8000) throw new Error("The queued prompt is too long.");
+  const queuedPrompts = request.queuedPrompts === undefined
+    ? (queuedPrompt ? [{id: makeRequestId(), text: queuedPrompt}] : []) : request.queuedPrompts;
+  const ids = new Set();
+  if (!Array.isArray(queuedPrompts) || queuedPrompts.length > 100 || queuedPrompts.some(item => {
+    if (!item || typeof item.id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(item.id) || ids.has(item.id)
+      || typeof item.text !== "string" || !item.text.trim() || item.text.length > 8000) return true;
+    ids.add(item.id); return false;
+  }) || queuedPrompts.reduce((total, item) => total + item.text.length, 0) > 80000) {
+    throw new Error("The queued messages are invalid or exceed the queue limits.");
+  }
   if (sourceUserFingerprint && (!Number.isInteger(sourceUserFingerprint.length)
     || sourceUserFingerprint.length < 1 || sourceUserFingerprint.length > 100000
     || typeof sourceUserFingerprint.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(sourceUserFingerprint.sha256))) {
@@ -810,6 +819,7 @@ async function prepareLogicRolloverLocked(request, sender) {
     previousTitle,
     message,
     queuedPrompt,
+    queuedPrompts: queuedPrompts.map(({id, text}) => ({id, text})),
     sourceUserFingerprint,
     limit,
     count,

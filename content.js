@@ -118,7 +118,9 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   let idleLogicUrl = "";
   let promptControlsExpanded = false;
   const QUEUED_PROMPT_LIMIT = 8000;
-  let queuedPrompt = null;
+  const QUEUED_PROMPT_COUNT_LIMIT = 100;
+  const QUEUED_PROMPT_TOTAL_LIMIT = 80000;
+  let queuedPrompts = [];
   let queuedPromptInFlight = null;
   let queuedPromptNote = "";
   let quickActionsHost = null;
@@ -235,7 +237,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
 
   async function checkpointLogicRun(allowPaused = false) {
     if (reconnectCheckpointBusy || reconnectRestoring || !state.running || state.mode !== "logic"
-      || (state.paused && !allowPaused) || state.error || queuedPrompt || queuedPromptInFlight
+      || (state.paused && !allowPaused) || state.error || queuedPrompts[0] || queuedPromptInFlight
       || !["monitoring", "resuming"].includes(state.logicPhase)) return null;
     reconnectCheckpointBusy = true;
     const runId = state.runId, url = window.location.href, count = state.count;
@@ -279,7 +281,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     const url = window.location.href, userBeforeReload = latestMessageSnapshot("user");
     try {
       await assertRunLocation(runId);
-      if (queuedPrompt || queuedPromptInFlight) throw new Error("A queued prompt needs review before reloading; it has been preserved.");
+      if (queuedPrompts[0] || queuedPromptInFlight) throw new Error("A queued prompt needs review before reloading; it has been preserved.");
       if (composerText(findComposer())) throw new Error("A draft is present and has been preserved. Reload manually after saving it.");
       state.paused = true;
       while (reconnectCheckpointBusy && state.running && state.runId === runId) await sleep(POLL_MS);
@@ -294,7 +296,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       while (Date.now() - started < 30000) {
         if (!state.running || state.runId !== runId) return null;
         if (window.location.href !== url || !state.paused || isGenerating()
-          || queuedPrompt || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
+          || queuedPrompts[0] || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
           || findDeliveryTimeoutNotice() !== response.notice) {
           throw new Error("The chat changed while preparing reconnection. Inspect it before resuming.");
         }
@@ -303,7 +305,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       const result = await reconnectMessage("LR_PREPARE", { token: reconnectToken, settings });
       if (!result?.ok) throw new Error(result?.error || "Reconnection could not be prepared.");
       if (!state.running || state.runId !== runId || window.location.href !== url || !state.paused
-        || isGenerating() || queuedPrompt || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
+        || isGenerating() || queuedPrompts[0] || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
           || findDeliveryTimeoutNotice() !== response.notice) {
         await reconnectMessage("LR_CLEAR");
         if (state.runId === runId) throw new Error("The chat changed before reload. Inspect it before resuming.");
@@ -950,7 +952,7 @@ ${LOGIC_START_PROMPT}
     const user = latestMessageSnapshot("user");
     const fingerprint = JSON.stringify([window.location.href, state.runId, state.running, state.mode,
       state.logicPhase, state.paused, state.error, state.count, state.limit, state.message,
-      state.rolloverEnabled, state.homeAssistantRequestId, queuedPrompt, Boolean(queuedPromptInFlight),
+      state.rolloverEnabled, state.homeAssistantRequestId, queuedPrompts, Boolean(queuedPromptInFlight),
       draft, generating, Boolean(composer), user.text]);
     if (fingerprint !== dashboardFingerprint || dashboardUser !== user.element) {
       dashboardRevision += 1; dashboardFingerprint = fingerprint; dashboardUser = user.element;
@@ -962,14 +964,17 @@ ${LOGIC_START_PROMPT}
       && !snapshotChanged(user, serverInputWait.baseline);
     return { ...publicStatus(), projectTitle: dashboardProjectTitle(), url: window.location.href.split(/[?#]/)[0], instanceId: heartbeatInstanceId,
       revision: String(dashboardRevision), message: state.message || "Continue", limit: state.limit || 5,
-      hasDraft: draft, generating, queuedPrompt: queuedPrompt?.text || "", queueNote: queuedPromptNote,
+      hasDraft: draft, generating, queuedPrompt: queuedPrompts[0]?.text || "", queueNote: queuedPromptNote,
+      queuedPrompts: queuedPrompts.map(({id, text}) => ({id, text, preparing: queuedPromptInFlight?.id === id})),
+      queueLimits: {items: QUEUED_PROMPT_COUNT_LIMIT, total: QUEUED_PROMPT_TOTAL_LIMIT},
       capabilities: {
         start_loop: idle, start_logic: idle, resume_logic: idle,
-        stop: state.running || state.mode === "logic" || Boolean(queuedPrompt),
+        stop: state.running || state.mode === "logic" || Boolean(queuedPrompts[0]),
         pause: state.running && state.mode === "logic" && !state.paused && !["stopping", "rolling_over"].includes(state.logicPhase),
         resume: state.running && state.mode === "logic" && state.paused,
         next_cycle: isIdleLogicCycle() && safe,
-        queue: canQueuePrompt(), queue_append: canQueuePrompt(), cancel_queue: Boolean(queuedPrompt) && !queuedPromptInFlight && state.logicPhase !== "rolling_over",
+        remove_queue: queuedPrompts.some(item => item !== queuedPromptInFlight) && state.logicPhase !== "rolling_over",
+        queue: canQueuePrompt(), queue_append: canQueuePrompt(), cancel_queue: Boolean(queuedPrompts[0]) && !queuedPromptInFlight && state.logicPhase !== "rolling_over",
         continue: idle && !hasMaximumLengthNotice(), status: idle && !hasMaximumLengthNotice(),
         reply: safe && waiting && userInputDelivery?.runId !== state.runId,
         approve: safe && waiting && userInputDelivery?.runId !== state.runId
@@ -1049,14 +1054,10 @@ ${LOGIC_START_PROMPT}
       } else if (action === "stop") stopLoop();
       else if (action === "pause" || action === "resume") toggleLogicPause();
       else if (action === "next_cycle") startNextLogicCycle();
-      else if (action === "queue") { if (!queueAdditionalPrompt(payload.text)) throw new Error("The prompt could not be queued. Use 1–8000 characters and review the agent state."); }
-      else if (action === "queue_append") {
-        const clean = typeof payload.text === "string" ? payload.text.trim() : "";
-        const existing = queuedPromptForLocation()?.text || "";
-        if (!clean || !queueAdditionalPrompt(existing ? `${existing}\n\n${clean}` : clean)) {
-          throw new Error("The message could not be appended. The combined queue must fit within 8,000 characters. Existing instructions were preserved.");
-        }
+      else if (action === "queue" || action === "queue_append") {
+        if (!queueAdditionalPrompt(payload.text)) throw new Error("The message could not be added. Use 1–8,000 characters; the queue holds up to 100 messages and 80,000 characters. Existing messages were preserved.");
       }
+      else if (action === "remove_queue") { if (!removeAdditionalPrompt(payload.id)) throw new Error("That queued message is no longer available or is being prepared."); }
       else if (action === "cancel_queue") { if (!cancelAdditionalPrompt()) throw new Error("The queued prompt is already being prepared."); }
       else result = await sendDashboardText(["reply", "approve"].includes(action) ? payload.text : action, ["reply", "approve"].includes(action), target);
       result ||= { ok: true, detail: "Command accepted.", status: dashboardSnapshot() };
@@ -1661,7 +1662,7 @@ ${LOGIC_START_PROMPT}
     const message = String(pending?.message || "").trim();
     const limit = Number.parseInt(pending?.limit, 10);
     const count = Number.parseInt(pending?.count, 10);
-    const additionalPrompt = typeof pending?.queuedPrompt === "string" ? pending.queuedPrompt.trim() : "";
+    const additionalPrompts = normalizeQueuedPrompts(pending);
 
     if (
       !destinationMatchesProject(pending?.projectSegment)
@@ -1675,7 +1676,7 @@ ${LOGIC_START_PROMPT}
       || !Number.isInteger(count)
       || count < 0
       || count >= limit
-      || additionalPrompt.length > QUEUED_PROMPT_LIMIT
+      || !additionalPrompts
     ) {
       throw new Error("The saved project-chat continuation could not be verified.");
     }
@@ -1733,8 +1734,8 @@ ${LOGIC_START_PROMPT}
     state.rolloverEnabled = true;
     state.rolloverRequestId = null;
     state.runId += 1;
-    queuedPrompt = additionalPrompt ? { text: additionalPrompt, url: window.location.href } : null;
-    queuedPromptNote = additionalPrompt ? "Queued for the continuation in this chat." : "";
+    queuedPrompts = additionalPrompts.map(item => ({ ...item, url: window.location.href }));
+    queuedPromptNote = additionalPrompts.length ? "Queued for the continuation in this chat." : "";
     setDetail(`Continuing project chat “${previousTitle}”…`);
     void runLogicMode(
       state.runId,
@@ -1830,13 +1831,14 @@ ${LOGIC_START_PROMPT}
       state.userInputBrief = "";
       setDetail(`Conversation limit reached. Preparing a new chat in the same project for “${previousTitle}”…`);
 
+      queuedPromptForLocation();
       const prepared = await chrome.runtime.sendMessage({
         type: "LOGIC_ROLLOVER_PREPARE",
         projectSegment,
         projectHomeUrl: rolloverAction.kind === "project_home" ? rolloverAction.url : "",
         previousTitle,
         message: state.message,
-        queuedPrompt: queuedPromptForLocation()?.text || "",
+        queuedPrompts: queuedPrompts.map(({id, text}) => ({id, text})),
         sourceUserFingerprint,
         limit: state.limit,
         count: state.count
@@ -1886,7 +1888,7 @@ ${LOGIC_START_PROMPT}
           if (claimed.pending) {
             await startClaimedLogicRollover(claimed.pending);
           } else if (claimed.completed) {
-            queuedPrompt = null;
+            queuedPrompts = [];
             finishRolloverLocally("Logic Mode moved to the new project chat.");
           } else {
             throw new Error("The handoff was not confirmed. Inspect the destination chat before resuming; the continuation may already have been attempted.");
@@ -1907,7 +1909,7 @@ ${LOGIC_START_PROMPT}
       });
       state.rolloverRequestId = null;
       if (cancelled?.ok && cancelled.completed) {
-        queuedPrompt = null;
+        queuedPrompts = [];
         finishRolloverLocally("Logic Mode moved to the new project chat.");
       } else {
         finishRolloverLocally(
@@ -2284,34 +2286,63 @@ ${LOGIC_START_PROMPT}
     syncHeartbeat();
   }
 
-  function queuedPromptForLocation() {
-    if (queuedPrompt && queuedPrompt.url !== window.location.href) {
-      throw new Error("The chat changed with an unsent queued prompt. Cancel it before continuing in another chat.");
+  function normalizeQueuedPrompts(pending) {
+    // Old handoff receipts carried one string. New receipts retain entry IDs
+    // and ordering; reject the entire queue rather than silently truncating it.
+    const items = pending?.queuedPrompts === undefined
+      ? (typeof pending?.queuedPrompt === "string" && pending.queuedPrompt.trim()
+        ? [{id: crypto.randomUUID(), text: pending.queuedPrompt.trim()}] : []) : pending.queuedPrompts;
+    if (!Array.isArray(items) || items.length > QUEUED_PROMPT_COUNT_LIMIT) return null;
+    const ids = new Set();
+    let total = 0;
+    for (const item of items) {
+      if (!item || typeof item.id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(item.id) || ids.has(item.id)
+        || typeof item.text !== "string" || !item.text.trim() || item.text.length > QUEUED_PROMPT_LIMIT) return null;
+      ids.add(item.id); total += item.text.length;
     }
-    return queuedPrompt;
+    return total <= QUEUED_PROMPT_TOTAL_LIMIT ? items.map(({id, text}) => ({id, text})) : null;
+  }
+
+  function queuedPromptForLocation() {
+    if (queuedPrompts.some(item => item.url !== window.location.href)) {
+      throw new Error("The chat changed with unsent queued messages. Clear the queue before continuing in another chat.");
+    }
+    return queuedPrompts[0] || null;
   }
 
   function canQueuePrompt() {
     return (state.running || isIdleLogicCycle()) && state.mode === "logic"
       && !["stopping", "rolling_over"].includes(state.logicPhase)
-      && !queuedPromptInFlight
+      && queuedPrompts.length < QUEUED_PROMPT_COUNT_LIMIT
+      && queuedPrompts.reduce((total, item) => total + item.text.length, 0) < QUEUED_PROMPT_TOTAL_LIMIT
+      && queuedPrompts.every(item => item.url === window.location.href)
       && /\/c\/[^/]+/.test(new URL(window.location.href).pathname);
   }
 
   function queueAdditionalPrompt(text) {
-    if (!canQueuePrompt()) return false;
-    const clean = String(text || "").trim();
-    if (!clean || clean.length > QUEUED_PROMPT_LIMIT) return false;
-    queuedPrompt = { text: clean, url: window.location.href };
-    queuedPromptNote = "Queued once for the next automatic message.";
+    if (!canQueuePrompt() || typeof text !== "string") return false;
+    const clean = text.trim();
+    if (!clean || clean.length > QUEUED_PROMPT_LIMIT
+      || queuedPrompts.reduce((total, item) => total + item.text.length, 0) + clean.length > QUEUED_PROMPT_TOTAL_LIMIT) return false;
+    queuedPrompts.push({ id: crypto.randomUUID(), text: clean, url: window.location.href });
+    queuedPromptNote = "Added to the queue. One message is included per automatic round.";
+    updateOverlay();
+    return true;
+  }
+
+  function removeAdditionalPrompt(id) {
+    const item = queuedPrompts.find(entry => entry.id === id);
+    if (!item || item === queuedPromptInFlight || state.logicPhase === "rolling_over") return false;
+    queuedPrompts = queuedPrompts.filter(entry => entry !== item);
+    queuedPromptNote = "Queued message removed.";
     updateOverlay();
     return true;
   }
 
   function cancelAdditionalPrompt() {
     if (queuedPromptInFlight || state.logicPhase === "rolling_over") return false;
-    queuedPrompt = null;
-    queuedPromptNote = "Queued prompt cancelled.";
+    queuedPrompts = [];
+    queuedPromptNote = "Queue cleared.";
     updateOverlay();
     return true;
   }
@@ -2321,22 +2352,40 @@ ${LOGIC_START_PROMPT}
     const shadow = overlayHost.shadowRoot;
     const section = shadow.querySelector(".prompt-queue");
     const promptToggle = shadow.querySelector(".toggle-prompt");
-    const available = state.mode === "logic" || Boolean(queuedPrompt);
+    const available = state.mode === "logic" || Boolean(queuedPrompts[0]);
     promptToggle.hidden = !available;
-    promptToggle.textContent = `${promptControlsExpanded ? "Hide prompt" : "Show prompt"}${queuedPrompt ? " · queued" : ""}`;
+    promptToggle.textContent = `${promptControlsExpanded ? "Hide prompt" : "Show prompt"}${queuedPrompts.length ? ` · ${queuedPrompts.length} queued` : ""}`;
     promptToggle.setAttribute("aria-expanded", String(available && promptControlsExpanded));
     section.hidden = !available || !promptControlsExpanded;
     const input = shadow.querySelector(".prompt-input");
     const queueButton = shadow.querySelector(".queue-prompt");
-    queueButton.disabled = !canQueuePrompt() || !input.value?.trim();
-    queueButton.textContent = queuedPrompt ? "Replace queued prompt" : "Queue for next round";
+    queueButton.disabled = !canQueuePrompt() || !input.value?.trim()
+      || queuedPrompts.reduce((total, item) => total + item.text.length, 0) + input.value.trim().length > QUEUED_PROMPT_TOTAL_LIMIT;
+    queueButton.textContent = "Add to queue";
     const cancelButton = shadow.querySelector(".cancel-prompt");
-    cancelButton.hidden = !queuedPrompt;
+    cancelButton.hidden = !queuedPrompts[0];
     cancelButton.disabled = Boolean(queuedPromptInFlight) || state.logicPhase === "rolling_over";
     const note = shadow.querySelector(".queue-note");
-    note.textContent = queuedPrompt
-      ? `${queuedPromptInFlight ? "Preparing to send" : isIdleLogicCycle() ? "Not sent — start the next cycle or cancel" : !state.running ? "Not sent — resume this chat or cancel" : "Queued"}: ${queuedPrompt.text.slice(0, 160)}${queuedPrompt.text.length > 160 ? "…" : ""}`
-      : queuedPromptNote || "Adds instructions once; does not interrupt the current response.";
+    note.textContent = queuedPrompts.length
+      ? `${queuedPrompts.length} queued · ${isIdleLogicCycle() || !state.running ? "Not sent — resume or start the next cycle when ready." : "One message per automatic round."}`
+      : queuedPromptNote || "Add messages without interrupting the current response.";
+    const list = shadow.querySelector(".queue-list");
+    const fingerprint = JSON.stringify([queuedPrompts, queuedPromptInFlight?.id, state.logicPhase]);
+    if (list.queueFingerprint !== fingerprint) {
+      list.queueFingerprint = fingerprint;
+      list.replaceChildren(...queuedPrompts.map((item, index) => {
+        const row = document.createElement("li");
+        const text = document.createElement("span");
+        text.textContent = `${index + 1}. ${item.text}`;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = item === queuedPromptInFlight ? "Preparing…" : "Remove";
+        remove.setAttribute("aria-label", `Remove queued message ${index + 1}`);
+        remove.disabled = item === queuedPromptInFlight || state.logicPhase === "rolling_over";
+        remove.addEventListener("click", () => removeAdditionalPrompt(item.id));
+        row.append(text, remove); return row;
+      }));
+    }
   }
 
   function isIdleLogicCycle() {
@@ -2442,6 +2491,9 @@ ${LOGIC_START_PROMPT}
         .queue-prompt { background: #2563eb; }
         .queue-prompt:hover { background: #1d4ed8; }
         button:disabled { opacity: .5; cursor: default; }
+        .queue-list { padding: 0; list-style: none; max-height: 240px; overflow: auto; }
+        .queue-list li { display: flex; align-items: start; gap: 8px; padding: 8px 0; border-bottom: 1px solid #475569; }
+        .queue-list span { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 400; }
         .queue-note { display: block; margin-top: 6px; color: #d1d5db; font-weight: 400; overflow-wrap: anywhere; white-space: pre-wrap; }
         button:focus-visible, textarea:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
       </style>
@@ -2457,13 +2509,14 @@ ${LOGIC_START_PROMPT}
         <button class="stop" type="button">Stop</button>
         <button class="dismiss" type="button" hidden>Dismiss</button>
         <div id="next-round-controls" class="prompt-queue" hidden>
-          <label for="next-round-prompt">Extra instructions for the next round</label>
-          <textarea id="next-round-prompt" class="prompt-input" rows="2" maxlength="8000" placeholder="Type a prompt, then click Queue for next round"></textarea>
+          <label for="next-round-prompt">Add a message to the queue</label>
+          <textarea id="next-round-prompt" class="prompt-input" rows="2" maxlength="8000" placeholder="Type a message, then click Add to queue"></textarea>
           <div class="queue-actions">
-            <button class="queue-prompt" type="button">Queue for next round</button>
-            <button class="cancel-prompt" type="button" hidden>Cancel queued prompt</button>
+            <button class="queue-prompt" type="button">Add to queue</button>
+            <button class="cancel-prompt" type="button" hidden>Clear queue</button>
           </div>
           <span class="queue-note" role="status" aria-live="polite"></span>
+          <ol class="queue-list" aria-label="Queued messages"></ol>
         </div>
       </div>
     `;
@@ -2496,7 +2549,7 @@ ${LOGIC_START_PROMPT}
 
   function updateOverlay() {
     const idleCycle = isIdleLogicCycle();
-    if (!state.running && !queuedPrompt && !idleCycle && !terminalNotice) {
+    if (!state.running && !queuedPrompts[0] && !idleCycle && !terminalNotice) {
       overlayHost?.remove();
       overlayHost = null;
       return;
@@ -2507,7 +2560,7 @@ ${LOGIC_START_PROMPT}
     const detail = overlayHost.shadowRoot.querySelector(".detail");
     const timer = overlayHost.shadowRoot.querySelector(".timer");
     const pauseButton = overlayHost.shadowRoot.querySelector(".pause");
-    const label = state.mode === "setup" ? "Server setup" : state.mode === "logic" || queuedPrompt ? "Logic mode" : "Continue loop";
+    const label = state.mode === "setup" ? "Server setup" : state.mode === "logic" || queuedPrompts[0] ? "Logic mode" : "Continue loop";
     headline.textContent = terminalNotice ? (state.logicPhase === "recovery_paused" ? "Threadlamp · Paused" : "Threadlamp · Stopped") : `${label}${idleCycle ? " · Idle" : ""} · ${state.count}/${state.limit}`;
     overlayHost.shadowRoot.querySelector(".dismiss").hidden = !terminalNotice;
     detail.textContent = state.detail;
@@ -2779,6 +2832,7 @@ ${LOGIC_START_PROMPT}
       && submitted && owner.submitted === submitted && Date.now() <= deadline && candidate()) {
       const user = latestMessageSnapshot("user");
       if (matchesSubmission(user) && (!submitted.verifiedUserId || messageSnapshotId(user) === submitted.verifiedUserId)) {
+        for (const item of queuedPrompts) { if (item.url === owner.url) item.url = window.location.href; }
         owner.identity = chatIdentity(); owner.url = window.location.href;
         return;
       }
@@ -3053,7 +3107,7 @@ ${LOGIC_START_PROMPT}
       if (addition) {
         // Once Send is attempted, delivery can be uncertain. Never automatically
         // replay the user's extra instructions after a timeout or restart.
-        queuedPrompt = null;
+        queuedPrompts = queuedPrompts.filter(item => item !== addition);
         queuedPromptNote = "Queued prompt included in the send attempt. Check the chat if delivery fails.";
         updatePromptControls();
       }
@@ -3974,7 +4028,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function stopLogicMode() {
-    queuedPrompt = null;
+    queuedPrompts = [];
     queuedPromptNote = "";
     disableHeartbeat();
     if (!state.running && state.mode === "logic" && state.logicPhase === "idle") {

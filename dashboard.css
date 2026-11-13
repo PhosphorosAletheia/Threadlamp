@@ -260,3 +260,9 @@ dialog::backdrop { background: #00000099; backdrop-filter: blur(2px); }
 .last-output p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .last-output small { opacity: .75; }
 .agent-select .summary-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; font-size: 12px; }
+
+.queue-list { padding: 0; list-style: none; margin: 0; }
+.queue-item { display: flex; align-items: flex-start; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.queue-item > div { flex: 1; min-width: 0; }
+.queue-item > button { flex-shrink: 0; }
+.queue-item .preserve-text { max-height: 200px; overflow: auto; margin-bottom: 0; }
