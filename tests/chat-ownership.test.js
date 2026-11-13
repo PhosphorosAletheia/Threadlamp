@@ -6,6 +6,7 @@
 "use strict";
 const assert = require("node:assert/strict");
 const { fixture } = require("./delivery-timeout.test.js");
+const { visibleElement } = require("./rollover.test.js");
 
 (async () => {
   for (const mode of ["logic", "loop"]) {
@@ -77,5 +78,64 @@ const { fixture } = require("./delivery-timeout.test.js");
     assert.equal(f.sends.length, 1);
     assert.equal(f.api.state.error, crossProject, "only the exact submitted turn in the same project can bind a new chat URL");
   }
-  console.log("chat ownership and guarded first-send navigation tests passed");
+  // Delivery can be observed on the project landing page long before ChatGPT
+  // assigns the saved URL. Keep proof of that message, not just its prompt text.
+  for (const scenario of ["delayed", "long-delay", "local", "render-late", "handoff", "no-id", "wrong-id",
+    "wrong-text", "cross-project", "cross-origin", "saved-to-saved", "second-hop", "cancelled"]) {
+    const f = fixture(["continue", "idle"]); f.hide();
+    const home = `https://chatgpt.com/g/${project}/project`;
+    const saved = `https://chatgpt.com/g/${project}/c/saved`;
+    f.window.location = new URL(scenario === "saved-to-saved" ? saved + "-original"
+      : scenario === "local" ? `https://chatgpt.com/g/${project}/c/local-chatgpt:temporary` : home);
+    let absent = false;
+    f.api.setTimeoutSnapshotsForTest(role => {
+      if (!f.sends.length || absent) return {element:null, text:""};
+      const element = role === "user" ? f.user() : f.assistant();
+      return {element, text:element.textContent};
+    });
+    if (scenario === "handoff") {
+      const form = visibleElement();
+      const high = visibleElement("High", {"aria-label":"Select ChatGPT model", "aria-haspopup":"menu", "aria-expanded":"false"});
+      form.querySelectorAll = () => [high];
+      f.composer.closest = selector => selector === "form" ? form : null;
+      f.setRequestHandler(async request => {
+        f.requests.push(request);
+        return request.type === "LOGIC_ROLLOVER_COMPLETE"
+          ? {ok:true, heartbeatSchedule:{id:"schedule", enabled:true, phase:"active",
+            url:`https://chatgpt.com/g/${project}/c/source`, pendingDestination:true, projectSegment:project}}
+          : {ok:true};
+      });
+    }
+    const click = f.send.click;
+    f.send.click = () => {
+      click();
+      if (f.sends.length !== 1) return;
+      if (scenario === "no-id") f.user().getAttribute = () => null;
+      f.onTick(() => {
+        f.advanceClock(scenario === "long-delay" ? 10 * 60 * 1000 : 9000);
+        const target = scenario === "cross-project" ? saved.replace("0123", "abcd")
+          : scenario === "cross-origin" ? saved.replace("chatgpt.com", "chat.openai.com") : saved;
+        f.window.location = new URL(target);
+        if (scenario === "wrong-id") {
+          const text = f.user().textContent;
+          f.newUser(); f.user().textContent = f.user().innerText = text;
+        }
+        if (scenario === "wrong-text") f.user().textContent = "Different instructions";
+        if (scenario === "render-late") absent = true;
+        if (scenario === "cancelled") { f.api.state.running = false; f.api.state.runId++; }
+        f.onTick(() => {
+          absent = false;
+          if (scenario === "second-hop") f.window.location = new URL(saved + "-another");
+          f.onTick(() => {});
+        });
+      });
+    };
+    await f.api.runLogicMode(1, false, "Initial continuation", "Starting", scenario === "handoff"
+      ? {failureId:"receipt", projectSegment:project, sourceUrl:`https://chatgpt.com/g/${project}/c/source`} : null);
+    const allowed = ["delayed", "long-delay", "local", "render-late", "handoff"].includes(scenario);
+    assert.deepEqual(f.sends, allowed ? ["Initial continuation", "Configured followup"] : ["Initial continuation"], scenario);
+    if (scenario !== "cancelled") assert.equal(f.api.state.error, !allowed, scenario);
+    if (scenario === "handoff") assert.equal(f.requests.filter(r => r.type === "LOGIC_ROLLOVER_COMPLETE").length, 1);
+  }
+  console.log("chat ownership, delayed saved-URL binding and guarded first-send navigation tests passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -115,6 +115,10 @@ An enabled heartbeat schedule stays attached to the source conversation while th
 verified continuation is prepared and sent. It moves to the destination only after
 the continuation is observed there. Ordinary navigation does not authorize a send.
 
+If ChatGPT assigns the new conversation URL late, Logic Mode checks the delivered
+message ID and text before adopting it. A delayed URL alone does not stop the run;
+missing or mismatched message identity still requires inspection.
+
 A successful handoff means the continuation message was observed in the new chat;
 it does not verify that the model recovered all prior context. Review the first
 response. Threadlamp does not extend the model context or reset an

@@ -215,11 +215,15 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     return Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("");
   }
 
-  async function reconnectUserHash(snapshot) {
+  function messageSnapshotId(snapshot) {
     const element = snapshot.element;
     const identified = element?.getAttribute("data-message-id") ? element
       : element?.closest("[data-message-id]") || element?.querySelector?.("[data-message-id]");
-    const id = identified?.getAttribute("data-message-id");
+    return identified?.getAttribute("data-message-id") || "";
+  }
+
+  async function reconnectUserHash(snapshot) {
+    const id = messageSnapshotId(snapshot);
     return id && snapshot.text ? reconnectHash(`${id}\n${snapshot.text}`) : "";
   }
 
@@ -2737,7 +2741,19 @@ ${LOGIC_START_PROMPT}
 
   async function assertRunLocation(runId) {
     const owner = runOwnership;
-    if (!owner || owner.runId !== runId || chatIdentity() === owner.identity) return;
+    if (!owner || owner.runId !== runId) return;
+    const submitted = owner.submitted;
+    const matchesSubmission = user => submitted && snapshotChanged(user, submitted.before)
+      && rolloverRenderedText(user.text) === rolloverRenderedText(submitted.text);
+    if (chatIdentity() === owner.identity) {
+      // Remember delivery while still on the owned page. Saving a new chat's
+      // URL can lag behind its first response, well beyond the Send timeout.
+      if (submitted && !submitted.verifiedUserId) {
+        const user = latestMessageSnapshot("user");
+        if (matchesSubmission(user)) submitted.verifiedUserId = messageSnapshotId(user);
+      }
+      return;
+    }
     const origin = new URL(owner.url).origin;
     const oldChat = new URL(owner.url).pathname.match(/\/c\/([^/]+)/)?.[1];
     const candidate = () => {
@@ -2748,12 +2764,14 @@ ${LOGIC_START_PROMPT}
         && (!oldChat || oldChat.startsWith("local-chatgpt:"))
         && (oldProject ? sameRolloverProject(oldProject, currentProject) : !currentProject);
     };
-    // A first send can replace a project-home/local URL with a saved chat URL.
-    // Require our exact submitted user turn before accepting that new identity.
+    // A previously observed message ID proves continuity after a delayed URL
+    // change. Without that proof, retain the original short confirmation window.
+    // Waiting for the destination to render is bounded in either case.
+    const deadline = submitted?.verifiedUserId ? Date.now() + SEND_ENABLE_TIMEOUT_MS : submitted?.deadline;
     while (state.running && state.runId === runId && owner === runOwnership
-      && owner.submitted && Date.now() <= owner.submitted.deadline && candidate()) {
+      && submitted && owner.submitted === submitted && Date.now() <= deadline && candidate()) {
       const user = latestMessageSnapshot("user");
-      if (snapshotChanged(user, owner.submitted.before) && rolloverRenderedText(user.text) === rolloverRenderedText(owner.submitted.text)) {
+      if (matchesSubmission(user) && (!submitted.verifiedUserId || messageSnapshotId(user) === submitted.verifiedUserId)) {
         owner.identity = chatIdentity(); owner.url = window.location.href;
         return;
       }

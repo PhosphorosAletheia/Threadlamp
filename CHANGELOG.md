@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.1 beta 1
+
+- Keep Logic Mode attached to a newly created conversation when its saved URL
+  appears after the startup message has already been delivered.
+- Verify the delivered message ID and text before accepting a delayed URL change.
+  Changed messages, other projects, and switches between saved chats still stop automation.
+
 ## 1.10.0 beta 1
 
 - Add optional OpenRouter last-output summaries to agent cards and the dashboard.
