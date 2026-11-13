@@ -173,6 +173,12 @@ dialog::backdrop { background: #00000099; backdrop-filter: blur(2px); }
 .dialog-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding: 13px 23px; }
 .dialog-footer .check { font-size: 11px; }
 .preferences-dialog { width: 460px; max-width: calc(100% - 28px); border-radius: 13px; }
+.broadcast-dialog { width: 560px; max-width: calc(100% - 28px); max-height: calc(100% - 28px); border-radius: 13px; overflow: auto; }
+.broadcast-body { padding: 20px 23px; }
+.broadcast-body > p { margin-bottom: 12px; }
+.broadcast-results { padding-left: 20px; overflow-wrap: anywhere; }
+.broadcast-results li { margin: 9px 0; }
+#broadcast-open { font-size: 11px; padding: 6px 8px; }
 .preferences-body { padding: 23px; }
 .preferences-body>#test-sound { margin: 15px 0; }
 .preferences-body .quick-tools>button { margin-top: 15px; }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.11.0 beta 1
+
+- Add a Message all agents popup to queue shared instructions across connected agents.
+- Append to existing queues, preserve drafts, and show a result for each recipient.
+- Skip offline or unavailable agents, full queues, and duplicate conversation tabs.
+  Recheck each destination and prevent automatic retries of uncertain deliveries.
+
 ## 1.10.1 beta 1
 
 - Keep Logic Mode attached to a newly created conversation when its saved URL

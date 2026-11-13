@@ -11,6 +11,7 @@
   let schedule = null, connection = null, lastInspection = 0, inspectionPending = false;
   let approvalMessage = "", lastSettings = 0;
   let cardsFingerprint = "", eventsFingerprint = "";
+  let broadcastRecipients = [], broadcastAttempted = false;
   const drafts = new Map();
   const panels = new Map();
   const priority = agent => !agent.online ? 5 : agent.error ? 0 : agent.logicPhase === "waiting_user" ? 1
@@ -58,6 +59,7 @@
     }
   }
   function renderAgents() {
+    $("broadcast-open").disabled = busy || (!broadcastAttempted && !agents.some(a => a.online));
     $("total").textContent = agents.filter(a => a.online).length;
     $("working").textContent = agents.filter(a => a.online && a.running && !a.paused && !a.error && !["sleeping", "waiting_user", "waiting_external"].includes(a.logicPhase)).length;
     $("waiting").textContent = agents.filter(a => a.online && a.logicPhase === "waiting_user").length;
@@ -262,6 +264,79 @@
     } catch (error) { notice(error.message, true); return false; }
     finally { busy = false; lastInspection = 0; await refresh(); renderDetail(); }
   }
+  function prepareBroadcast(clear = false) {
+    broadcastAttempted = false;
+    broadcastRecipients = agents.filter(a => a.online).map(a => ({ ...target(a), title: a.title, chatTitle: a.chatTitle }));
+    if (clear) $("broadcast-text").value = "";
+    $("broadcast-text").readOnly = false;
+    $("broadcast-submit").disabled = !broadcastRecipients.length;
+    $("broadcast-new").hidden = true;
+    $("broadcast-status").textContent = "";
+    $("broadcast-results").replaceChildren();
+    $("broadcast-scope").textContent = `${broadcastRecipients.length} connected agents, including those hidden by filters. Offline agents are excluded. Unavailable queues and duplicate conversation tabs will be listed as skipped.`;
+  }
+  $("broadcast-open").addEventListener("click", () => {
+    if (busy) return;
+    if (!broadcastAttempted) prepareBroadcast();
+    $("broadcast-dialog").showModal();
+    $("broadcast-open").setAttribute("aria-expanded", "true");
+    if (!broadcastAttempted) $("broadcast-text").focus();
+  });
+  $("broadcast-dialog").addEventListener("close", () => $("broadcast-open").setAttribute("aria-expanded", "false"));
+  $("broadcast-new").addEventListener("click", () => { if (!busy) { prepareBroadcast(true); $("broadcast-text").focus(); } });
+  $("broadcast-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (busy || broadcastAttempted) return;
+    const text = $("broadcast-text").value.trim();
+    if (!text || text.length > 8000) { $("broadcast-status").textContent = "Enter a message of 1–8,000 characters."; return; }
+    broadcastAttempted = true; busy = true;
+    $("broadcast-submit").disabled = true; $("broadcast-text").readOnly = true;
+    $("broadcast-status").textContent = "Checking agents and adding to their queues…";
+    renderAgents(); renderDetail();
+    try {
+      // Keep the recipients the user reviewed, but refresh their revisions just
+      // before dispatch. A replacement page or new conversation is not a target.
+      const current = (await request("DB_LIST")).agents;
+      const seen = new Set();
+      const work = broadcastRecipients.map(recipient => {
+        const agent = current.find(a => key(a) === key(recipient) && a.online);
+        let reason = !agent ? "Disconnected or changed conversation." : !agent.capabilities?.queue_append ? "Queue unavailable in this agent's current state or version." : "";
+        const identity = agent && Heartbeat.chatKey(agent.url);
+        if (!reason && identity && seen.has(identity)) reason = "Duplicate conversation; included through another tab.";
+        if (!reason && (agent.queuedPrompt ? agent.queuedPrompt.length + 2 : 0) + text.length > 8000) reason = "Combined queue exceeds 8,000 characters; existing instructions preserved.";
+        if (!reason && identity) seen.add(identity);
+        return {recipient, agent, reason, commandId: crypto.randomUUID()};
+      });
+      const rows = work.map(item => {
+        const row = el("li");
+        const label = el("strong", item.recipient.title + (item.recipient.chatTitle && item.recipient.chatTitle !== item.recipient.title ? ` · ${item.recipient.chatTitle}` : ""));
+        const status = el("span", item.reason ? ` — Skipped: ${item.reason}` : " — Queuing…");
+        row.append(label, status); $("broadcast-results").append(row);
+        return status;
+      });
+      const outcomes = await Promise.all(work.map(async (item, index) => {
+        if (item.reason) return "skipped";
+        let result;
+        try {
+          result = await chrome.runtime.sendMessage({type:"DB_COMMAND", action:"queue_append", target:target(item.agent), payload:{text}, commandId:item.commandId});
+        } catch { /* Delivery may have happened; never retry automatically. */ }
+        const outcome = result?.ok === true ? "queued" : !result || result.uncertain ? "unconfirmed" : "failed";
+        rows[index].textContent = outcome === "queued" ? " — Queued for the next automatic send."
+          : outcome === "unconfirmed" ? " — Unconfirmed: inspect this agent's queue before retrying."
+          : ` — Not queued: ${result.error || "The agent rejected the message."}`;
+        return outcome;
+      }));
+      const count = type => outcomes.filter(value => value === type).length;
+      const summary = `Queued: ${count("queued")}. Skipped: ${count("skipped")}. Not queued: ${count("failed")}. Unconfirmed: ${count("unconfirmed")}.`;
+      $("broadcast-status").textContent = summary;
+      notice(summary, outcomes.some(value => value !== "queued"));
+    } catch (error) {
+      $("broadcast-status").textContent = `Could not check recipients. No messages were queued. ${error.message}`;
+    } finally {
+      busy = false; $("broadcast-new").hidden = false;
+      await refresh(); renderAgents(); renderDetail();
+    }
+  });
   for (const form of document.querySelectorAll("#detail form")) {
     form.addEventListener("submit", event => event.preventDefault());
     form.addEventListener("input", () => {

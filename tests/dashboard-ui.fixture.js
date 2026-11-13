@@ -14,8 +14,9 @@ const root = path.resolve(__dirname, "..");
 for (const file of ["dashboard.css", "brand.css", "dashboard.js", "heartbeat.js"]) fs.copyFileSync(path.join(root, file), path.join(output, file));
 function mock() {
   const actions = [];
+  let uncertainBroadcast = false;
   const caps = { start_loop: false, start_logic: false, resume_logic: false, stop: true, pause: true, resume: false,
-    next_cycle: false, queue: true, cancel_queue: false, continue: false, status: false, reply: false, approve: false };
+    next_cycle: false, queue: true, queue_append: true, cancel_queue: false, continue: false, status: false, reply: false, approve: false };
   const base = { online: true, revision: "1", mode: "logic", logicPhase: "monitoring", running: true, count: 2, limit: 10,
     message: "Continue", rolloverEnabled: true, lastSeen: Date.now(), queuedPrompt: "", capabilities: caps };
   const agents = [
@@ -41,6 +42,10 @@ function mock() {
       if (request.type === "DB_COMMAND") {
         actions.push(request);
         const agent = agents.find(a => a.tabId === request.target.tabId);
+        if (request.action === "queue_append") {
+          agent.queuedPrompt = (agent.queuedPrompt ? agent.queuedPrompt + "\n\n" : "") + request.payload.text;
+          if (uncertainBroadcast && agent.tabId === 18) return {ok:false, uncertain:true};
+        }
         if (request.action === "queue") { agent.queuedPrompt = request.payload.text; agent.capabilities = { ...agent.capabilities, cancel_queue: true }; }
         if (request.action === "pause") { agent.paused = true; agent.capabilities = { ...agent.capabilities, pause: false, resume: true }; }
         if (request.action === "resume") { agent.paused = false; agent.capabilities = { ...agent.capabilities, pause: true, resume: false }; }
@@ -156,6 +161,46 @@ function mock() {
       click('[data-filter="all"]');
       await select(17); tab("queue");
       checkLayout();
+      if (innerWidth <= 720) click("#back-to-agents");
+      change("filter", "waiting");
+      click("#broadcast-open");
+      assert($("broadcast-dialog").open, "Broadcast dialog opens");
+      assert($("broadcast-scope").textContent.startsWith("3 connected"), "Recipients include filtered agents but exclude offline history");
+      const beforeBroadcast = actions.length;
+      input("broadcast-text", "Shared instructions <do not render as HTML>");
+      const firstQueue = agents[0].queuedPrompt;
+      click("#broadcast-submit");
+      $("broadcast-form").dispatchEvent(new Event("submit", {bubbles:true, cancelable:true}));
+      await wait();
+      assert(actions.length === beforeBroadcast + 3, "One append per connected agent despite double submit");
+      assert(actions.slice(-3).every(a => a.action === "queue_append"), "Broadcast only uses append queues");
+      assert(agents[0].queuedPrompt === firstQueue + "\n\nShared instructions <do not render as HTML>", "Existing queue preserved");
+      assert($("broadcast-status").textContent.includes("Queued: 3"), "Success count is visible");
+      assert($("queued").value === "Unsent dashboard draft", "Broadcast preserves per-agent editor drafts");
+      click('[data-close="broadcast-dialog"]');
+      click("#broadcast-open");
+      assert($("broadcast-submit").disabled && actions.length === beforeBroadcast + 3, "Reopening results cannot replay a broadcast");
+      click("#broadcast-new");
+      const priorUrl = agents[2].url;
+      agents[2].url += "-changed";
+      uncertainBroadcast = true;
+      input("broadcast-text", "Second shared instruction");
+      click("#broadcast-submit"); await wait();
+      assert($("broadcast-status").textContent === "Queued: 1. Skipped: 1. Not queued: 0. Unconfirmed: 1.", "Partial and uncertain outcomes are reported separately");
+      assert(actions.length === beforeBroadcast + 5, "Changed conversation skipped; uncertain dispatch never retried");
+      agents[2].url = priorUrl; uncertainBroadcast = false;
+      const savedQueue = agents[2].queuedPrompt, savedCaps = agents[1].capabilities;
+      agents[2].queuedPrompt = "x".repeat(8000);
+      agents[1].capabilities = {...savedCaps, queue_append:false};
+      agents.push({...agents[0], tabId:21, instanceId:"duplicate"});
+      click("#refresh"); await wait(); click("#broadcast-new");
+      input("broadcast-text", "One copy per conversation");
+      click("#broadcast-submit"); await wait();
+      assert($("broadcast-status").textContent === "Queued: 1. Skipped: 3. Not queued: 0. Unconfirmed: 0.", "Duplicate conversations, full queues and unavailable agents are skipped");
+      assert(agents[2].queuedPrompt.length === 8000, "A full queue is never overwritten");
+      agents.pop(); agents[2].queuedPrompt = savedQueue; agents[1].capabilities = savedCaps;
+      click('[data-close="broadcast-dialog"]');
+      change("filter", "all"); await select(17); tab("queue");
       const originalTitle = agents[0].title, originalDetail = agents[0].detail;
       agents[0].title = "Long project title with several words and a very long identifier " + "project".repeat(28);
       agents[0].detail = "Detailed status message. ".repeat(80);
@@ -175,11 +220,12 @@ function mock() {
         assert(queueButton.bottom <= document.querySelector(".app-status").getBoundingClientRect().top, "Primary queue action is above the fold on laptop screens");
       }
       assert(errors.length === 0, errors.join("; "));
-      const report = document.createElement("pre"); report.id = "smoke-result"; report.textContent = "PASS: project selection, priority ordering, tabs, keyboard, queue, reply, approvals, pause/resume, heartbeat, activity filters, dialogs, focus, offline guards, draft retention, viewport layout; no browser errors";
+      const report = document.createElement("pre"); report.id = "smoke-result"; report.textContent = "PASS: project selection, priority ordering, tabs, keyboard, queue, broadcasts, partial results, deduplication, reply, approvals, pause/resume, heartbeat, activity filters, dialogs, focus, offline guards, draft retention, viewport layout; no browser errors";
       report.hidden = true; document.body.append(report);
       // Optional screenshot views use the same tested mock, never real chats.
       const preview = new URLSearchParams(location.search).get("preview");
       if (preview === "reply") await select(18);
+      if (preview === "broadcast") { if (innerWidth <= 720 && document.body.dataset.mobileView !== "agents") click("#back-to-agents"); click("#broadcast-open"); click("#broadcast-new"); input("broadcast-text", "Please include a brief progress summary in your next response."); }
       if (preview === "activity") click("#activity-toggle");
       if (preview === "agents" && innerWidth <= 720) click("#back-to-agents");
       document.activeElement?.blur();

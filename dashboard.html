@@ -27,7 +27,7 @@ SPDX-License-Identifier: MPL-2.0 -->
   </div>
   <main class="layout">
     <section class="agents-column" aria-labelledby="agents-title">
-      <div class="section-title"><h1 id="agents-title">Agents <span id="agent-list-count" class="count-badge">0</span></h1><span class="small muted">Attention first</span></div>
+      <div class="section-title"><h1 id="agents-title">Agents <span id="agent-list-count" class="count-badge">0</span></h1><button id="broadcast-open" aria-haspopup="dialog" aria-controls="broadcast-dialog">Message all agents</button></div>
       <div class="agent-filters"><label class="sr-only" for="search">Find a project or chat</label><input id="search" type="search" placeholder="Find a project or chat…"><label class="sr-only" for="filter">Filter agents</label><select id="filter"><option value="all">All agents</option><option value="running">Running</option><option value="waiting">Waiting for input</option><option value="sleeping">Sleeping</option><option value="paused">Paused</option><option value="errors">Needs attention</option><option value="offline">Offline / unavailable</option></select></div>
       <div id="agents" class="agent-list"></div>
       <div class="sidebar-footer"><span class="status-dot"></span> Live updates <span id="updated" class="muted"></span></div>
@@ -80,6 +80,18 @@ SPDX-License-Identifier: MPL-2.0 -->
     </section>
   </main>
   <footer class="app-status"><p id="notice" role="status" aria-live="polite">Ready</p><span>Local workspace · This Chrome profile</span></footer>
+  <dialog id="broadcast-dialog" class="broadcast-dialog" aria-labelledby="broadcast-title">
+    <div class="dialog-header"><h2 id="broadcast-title">Message all agents</h2><button data-close="broadcast-dialog" class="icon-button" aria-label="Close message all agents">×</button></div>
+    <form id="broadcast-form" class="broadcast-body">
+      <p id="broadcast-scope" class="muted"></p>
+      <label for="broadcast-text">Instructions for the next round</label>
+      <textarea id="broadcast-text" rows="6" maxlength="8000" aria-describedby="broadcast-help" placeholder="What should every agent know?" required></textarea>
+      <p id="broadcast-help" class="small muted">Added after existing queued instructions, within the 8,000-character limit. Agents use it on their next automatic send; this does not start or resume them.</p>
+      <div class="actions"><button id="broadcast-submit" type="submit" class="primary">Queue for all agents</button><button id="broadcast-new" type="button" hidden>New message</button></div>
+      <p id="broadcast-status" role="status" aria-live="polite"></p>
+      <ul id="broadcast-results" class="broadcast-results" aria-label="Queue results"></ul>
+    </form>
+  </dialog>
   <dialog id="activity-drawer" class="drawer" aria-labelledby="activity-title">
     <div class="dialog-header"><div><p class="eyebrow">WORKSPACE FEED</p><h2 id="activity-title">Activity</h2></div><button data-close="activity-drawer" class="icon-button" aria-label="Close activity">×</button></div>
     <div class="activity-filters"><label class="sr-only" for="event-scope">Activity scope</label><select id="event-scope"><option value="all">All agents</option><option value="selected">Selected agent</option></select><label class="sr-only" for="event-kind">Activity type</label><select id="event-kind"><option value="all">All updates</option><option value="attention">Input &amp; errors</option></select></div>

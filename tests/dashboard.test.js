@@ -119,6 +119,26 @@ async function projectTitleTests() {
 }
 
 async function contentTests() {
+  {
+    const batch = page();
+    batch.api.queueAdditionalPrompt("Existing instructions");
+    const append = request(batch, "queue_append", {text:"Shared instructions"}, "append-once");
+    assert.equal((await batch.api.executeDashboardCommand(append)).ok, true);
+    assert.equal((await batch.api.executeDashboardCommand(append)).ok, true);
+    assert.equal(batch.api.dashboardSnapshot().queuedPrompt, "Existing instructions\n\nShared instructions");
+    assert.deepEqual(batch.sends, [], "broadcast only queues; it never sends a prompt");
+    const stale = request(batch, "queue_append", {text:"Stale message"}, "append-stale");
+    batch.api.queueAdditionalPrompt("Updated locally");
+    assert.equal((await batch.api.executeDashboardCommand(stale)).ok, false);
+    assert.equal((await batch.api.executeDashboardCommand(request(batch, "queue_append", {text:"x".repeat(8000)}, "append-overflow"))).ok, false);
+    assert.equal(batch.api.dashboardSnapshot().queuedPrompt, "Updated locally");
+    batch.api.cancelAdditionalPrompt();
+    assert.equal((await batch.api.executeDashboardCommand(request(batch, "queue_append", {text:"First queued item"}, "append-empty"))).ok, true);
+    assert.equal(batch.api.dashboardSnapshot().queuedPrompt, "First queued item");
+    batch.api.state.running = false; batch.api.state.mode = "idle";
+    assert.equal((await batch.api.executeDashboardCommand(request(batch, "queue_append", {text:"No restart"}, "append-stopped"))).ok, false);
+    assert.equal(batch.api.state.running, false);
+  }
   let f = page();
   let snapshot = f.api.dashboardSnapshot();
   assert.equal(snapshot.capabilities.queue, true);
@@ -233,7 +253,7 @@ async function workerTests() {
   assert.equal(inspected.ok, true, inspected.error);
   assert.equal(inspected.schedule.intervalMinutes, 30);
   assert.equal(inspected.connection, null);
-  const action = { type: "DB_COMMAND", commandId: "test-command-1", action: "pause", target: target(snapshots.get(17)) };
+  const action = { type: "DB_COMMAND", commandId: "test-command-1", action: "queue_append", payload: {text:"Shared instructions"}, target: target(snapshots.get(17)) };
   assert.equal((await h.dispatch(action)).ok, true);
   assert.equal((await h.dispatch(action)).ok, true);
   assert.equal(executed.length, 1); assert.equal(executed[0].id, 17);

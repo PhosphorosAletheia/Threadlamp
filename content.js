@@ -969,7 +969,7 @@ ${LOGIC_START_PROMPT}
         pause: state.running && state.mode === "logic" && !state.paused && !["stopping", "rolling_over"].includes(state.logicPhase),
         resume: state.running && state.mode === "logic" && state.paused,
         next_cycle: isIdleLogicCycle() && safe,
-        queue: canQueuePrompt(), cancel_queue: Boolean(queuedPrompt) && !queuedPromptInFlight && state.logicPhase !== "rolling_over",
+        queue: canQueuePrompt(), queue_append: canQueuePrompt(), cancel_queue: Boolean(queuedPrompt) && !queuedPromptInFlight && state.logicPhase !== "rolling_over",
         continue: idle && !hasMaximumLengthNotice(), status: idle && !hasMaximumLengthNotice(),
         reply: safe && waiting && userInputDelivery?.runId !== state.runId,
         approve: safe && waiting && userInputDelivery?.runId !== state.runId
@@ -1050,6 +1050,13 @@ ${LOGIC_START_PROMPT}
       else if (action === "pause" || action === "resume") toggleLogicPause();
       else if (action === "next_cycle") startNextLogicCycle();
       else if (action === "queue") { if (!queueAdditionalPrompt(payload.text)) throw new Error("The prompt could not be queued. Use 1–8000 characters and review the agent state."); }
+      else if (action === "queue_append") {
+        const clean = typeof payload.text === "string" ? payload.text.trim() : "";
+        const existing = queuedPromptForLocation()?.text || "";
+        if (!clean || !queueAdditionalPrompt(existing ? `${existing}\n\n${clean}` : clean)) {
+          throw new Error("The message could not be appended. The combined queue must fit within 8,000 characters. Existing instructions were preserved.");
+        }
+      }
       else if (action === "cancel_queue") { if (!cancelAdditionalPrompt()) throw new Error("The queued prompt is already being prepared."); }
       else result = await sendDashboardText(["reply", "approve"].includes(action) ? payload.text : action, ["reply", "approve"].includes(action), target);
       result ||= { ok: true, detail: "Command accepted.", status: dashboardSnapshot() };

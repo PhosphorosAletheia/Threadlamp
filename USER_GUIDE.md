@@ -72,6 +72,19 @@ to view status, pause/resume it, queue instructions, reply, or manage its schedu
 Chats in one project remain separate targets. Offline or changed chats may require
 a refresh of dashboard status before controls can proceed.
 
+Use **Message all agents** above the agent list to open a shared message box.
+**Queue for all agents** appends the text after existing instructions in each
+connected agent's next-message queue, including agents hidden by search or filters.
+The recipient list is fixed when you open the popup; newly connected chats are not
+added while you type. This queues instructions without starting or resuming agents.
+
+The popup lists each outcome. Offline agents are excluded; unavailable queues,
+changed conversations, duplicate tabs for the same conversation, and queues that
+would exceed 8,000 characters are skipped or rejected. Inspect any unconfirmed
+queue before retrying that agent individually. Reopening the popup shows the last
+results; choose **New message** to compose another broadcast. Dashboard edits that
+have not been queued remain in their individual editors.
+
 Activity contains up to 300 recent local events. Dismissing an event does not answer
 the underlying request. Clear history removes event history; it is not a command
 to delete all saved agent metadata, schedules, or credentials.
