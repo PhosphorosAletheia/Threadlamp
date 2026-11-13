@@ -15,7 +15,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_ONLY_DIRS = frozenset({
     '.git', '.aws', '.codex', '.agents', 'rollback-artifacts', 'dist',
-    'node_modules', 'coverage', 'test-results',
+    'node_modules', 'coverage', 'test-results', '.threadlamp-lan',
 })
 
 

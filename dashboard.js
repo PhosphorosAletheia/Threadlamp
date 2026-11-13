@@ -6,6 +6,17 @@
 /* Dashboard UI. Commands go through the worker; rendered strings never become HTML. */
 (() => {
   "use strict";
+  const api = globalThis.LanDashboardAPI || {
+    sendMessage: request => chrome.runtime.sendMessage(request),
+    requestLoopbackPermission: () => chrome.permissions.request({origins:["http://localhost/*", "http://127.0.0.1/*"]}),
+    openSettings: () => chrome.runtime.openOptionsPage(),
+    openChat: async agent => {
+      const tab = await chrome.tabs.get(agent.tabId);
+      if (tab.url.split(/[?#]/)[0] !== agent.url) throw new Error("The tab changed. Refresh the dashboard.");
+      await chrome.tabs.update(agent.tabId, {active:true});
+      await chrome.windows.update(tab.windowId, {focused:true});
+    }
+  };
   const $ = id => document.getElementById(id);
   let agents = [], events = [], selectedKey = "", loading = false, busy = false, inspectedKey = "";
   let schedule = null, connection = null, lastInspection = 0, inspectionPending = false;
@@ -31,7 +42,7 @@
     return node;
   };
   async function request(type, data = {}) {
-    const response = await chrome.runtime.sendMessage({ type, ...data });
+    const response = await api.sendMessage({ type, ...data });
     if (!response || response.ok === false) throw new Error(response?.error || "The extension did not respond.");
     return response;
   }
@@ -355,7 +366,7 @@
         if (item.reason) return "skipped";
         let result;
         try {
-          result = await chrome.runtime.sendMessage({type:"DB_COMMAND", action:"queue_append", target:target(item.agent), payload:{text}, commandId:item.commandId});
+          result = await api.sendMessage({type:"DB_COMMAND", action:"queue_append", target:target(item.agent), payload:{text}, commandId:item.commandId});
         } catch { /* Delivery may have happened; never retry automatically. */ }
         const outcome = result?.ok === true ? "queued" : !result || result.uncertain ? "unconfirmed" : "failed";
         rows[index].textContent = outcome === "queued" ? " — Queued for the next automatic send."
@@ -403,7 +414,7 @@
           prompt: $("hb-prompt").value, limit: $("hb-limit").value, message: $("message").value, rolloverEnabled: $("rollover").checked });
         if (action === "server_resolve") payload = { eventId: $("server-event").value, resolution: button.dataset.resolution };
         if (["server_setup", "server_recover"].includes(action)) {
-          if (!await chrome.permissions.request({ origins: ["http://localhost/*", "http://127.0.0.1/*"] })) throw new Error("Local server permission was declined.");
+          if (!await api.requestLoopbackPermission()) throw new Error("Local server permission was declined.");
         }
         const actionKey = selectedKey;
         const done = await act(agent, action, payload, expected);
@@ -426,13 +437,12 @@
   $("open-chat").addEventListener("click", async () => {
     const agent = selected(); if (!agent?.online) return;
     try {
-      const tab = await chrome.tabs.get(agent.tabId);
-      if (tab.url.split(/[?#]/)[0] !== agent.url) throw new Error("The tab changed. Refresh the dashboard.");
-      await chrome.tabs.update(agent.tabId, { active: true });
-      await chrome.windows.update(tab.windowId, { focused: true });
+      await api.openChat(agent);
     } catch (error) { notice(error.message, true); }
   });
-  $("settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
+  $("settings").addEventListener("click", async () => {
+    try { await api.openSettings(); } catch (error) { notice(error.message, true); }
+  });
   $("sound").addEventListener("change", async () => {
     try { await request("ALERT_SET_SETTINGS", { settings: { soundEnabled: $("sound").checked } }); notice("Sound preference saved."); }
     catch (error) { notice(error.message, true); }

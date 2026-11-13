@@ -227,3 +227,10 @@ or queued prompts. Keep its passphrase separately; it cannot be recovered.
 Uninstalling deletes extension-managed local storage. It does not erase ChatGPT
 messages, downloaded backups, phone notifications or records on connected services.
 Use those services' deletion and revocation controls separately.
+
+## Dashboard on your LAN
+
+Use the optional [LAN dashboard helper](LAN_DASHBOARD.md) to queue messages,
+broadcast, control Logic Mode, and manage heartbeats from another device. Setup
+requires the source package and a local Node.js helper. LAN access is off until
+you pair it in extension settings.

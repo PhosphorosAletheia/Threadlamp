@@ -12,3 +12,4 @@
 *.bundle
 *.log
 __pycache__/
+/.threadlamp-lan/

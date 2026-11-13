@@ -213,7 +213,31 @@
     });
     throw new Error("Unknown dashboard request.");
   }
-  globalThis.DashboardWorker = { verifyTarget, notification };
+  async function remote(request) {
+    if (!LanProtocol.allowed(request)) throw new Error("This operation is unavailable through the LAN dashboard.");
+    await initializationPromise;
+    // Only the paired bridge calls this internal capability. Content-script and
+    // extension message listeners retain their original sender checks.
+    const sender = {id:chrome.runtime.id, url:chrome.runtime.getURL("dashboard.html")};
+    if (request.type.startsWith("DB_")) return handle(request, sender);
+    if (request.type === "HA_GET_SETTINGS") {
+      const settings = publicSettings();
+      return {enabled:settings.enabled, approvalMessage:settings.approvalMessage, connection:{phase:settings.connection?.phase}};
+    }
+    if (request.type === "ALERT_GET_SETTINGS") return {...alertSettings};
+    if (request.type === "ALERT_SET_SETTINGS") return saveAlertSettings({soundEnabled:request.settings?.soundEnabled});
+    if (request.type === "ALERT_TEST_SOUND") return playWorkstationAlert(true);
+    if (request.type === "LAN_LOOPBACK_PERMISSION") return {ok:true, granted:await chrome.permissions.contains({origins:["http://localhost/*", "http://127.0.0.1/*"]})};
+    if (request.type === "LAN_OPEN_OPTIONS") { await chrome.runtime.openOptionsPage(); return {ok:true}; }
+    if (request.type === "LAN_OPEN_CHAT") {
+      await verifyTarget(request.target);
+      const tab = await chrome.tabs.update(request.target.tabId, {active:true});
+      await chrome.windows.update(tab.windowId, {focused:true});
+      return {ok:true};
+    }
+    throw new Error("Unsupported LAN dashboard operation.");
+  }
+  globalThis.DashboardWorker = { verifyTarget, notification, remote };
   chrome.runtime.onMessage.addListener((request, sender, respond) => {
     if (!String(request?.type || "").startsWith("DB_")) return false;
     handle(request, sender).then(respond, error => respond({ ok: false, error: error.message }));

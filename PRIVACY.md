@@ -1,7 +1,7 @@
 # Threadlamp privacy notice
 
 Publisher: [Phosphoros Research](https://phosphoros-research.pages.dev/).
-Applies to Threadlamp 1.10.0 beta 1. Prepared November 12, 2026.
+Applies to Threadlamp 1.13.0 beta 1. Updated November 13, 2026.
 
 ## Data handled
 
@@ -74,9 +74,9 @@ other data categories, including the OpenRouter key and summaries; see the user 
 | `storage` | Save preferences, schedules, integration records and bounded history. |
 | `offscreen` | Play locally generated notification sounds. |
 | `scripting` | Reattach bundled page scripts to an eligible active chat when needed. |
-| `alarms` | Schedule heartbeat wakeups. |
+| `alarms` | Schedule heartbeat wakeups and reconnect an enabled LAN bridge. |
 | ChatGPT host access | Read page state and submit the requested chat controls. |
-| Optional HTTP/HTTPS hosts | Request user-selected Home Assistant site access localhost access for project connections, or OpenRouter access for output summaries. The declaration permits configurable hosts; access is requested at setup. |
+| Optional HTTP/HTTPS hosts | Request user-selected Home Assistant site access, loopback access for project connections or the LAN helper, or OpenRouter access for output summaries. The declaration permits configurable hosts; access is requested at setup. |
 
 ## Control and deletion
 
@@ -92,3 +92,13 @@ delete downloaded backups and service-side messages/records separately.
 For a privacy question, use the repository's issue tracker with a nonsensitive
 description. For a vulnerability, follow [SECURITY.md](SECURITY.md). Never publish
 credentials, chat URLs, transcripts, backup files or diagnostic dumps in an issue.
+
+## Optional LAN dashboard
+
+When enabled, the paired helper receives dashboard state, queued messages,
+summaries, schedules, and control requests over a loopback connection. Signed-in
+LAN devices receive this information over HTTPS. The helper stores credentials
+and TLS material in a private host directory; sessions and requests stay in
+memory. It does not log or persist message bodies. The extension stores its
+pairing token in local extension storage, excluded from settings exports.
+See [LAN setup](LAN_DASHBOARD.md) for access and retention details.

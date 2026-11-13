@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.13.0 beta 1
+
+- Add an optional HTTPS LAN helper with sign-in and full dashboard controls.
+- Pair the helper through extension settings; keep the browser bridge on loopback.
+- Reuse existing agent identity and command receipt checks, and never replay
+  commands after uncertain delivery or a disconnect.
+- Preserve unsent dashboard drafts when a LAN session expires.
+
 ## 1.12.2 beta 1
 
 - Add a Hide unavailable agents checkbox above the dashboard agent list.

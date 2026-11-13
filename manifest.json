@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Threadlamp",
-  "version": "1.12.2",
+  "version": "1.13.0",
   "minimum_chrome_version": "116",
   "description": "Manage ChatGPT follow-ups, prompt queues, and scheduled check-ins from one dashboard.",
   "permissions": [
@@ -47,7 +47,7 @@
       "run_at": "document_idle"
     }
   ],
-  "version_name": "1.12.2 beta 1",
+  "version_name": "1.13.0 beta 1",
   "author": "Phosphoros Research",
   "homepage_url": "https://phosphoros-research.pages.dev/",
   "icons": {

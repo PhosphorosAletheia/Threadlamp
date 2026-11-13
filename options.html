@@ -103,6 +103,14 @@ SPDX-License-Identifier: MPL-2.0 -->
         </form>
       </section>
 
+      <section class="card" aria-labelledby="lan-heading">
+        <h2 id="lan-heading">LAN dashboard helper</h2>
+        <p>Run the Threadlamp helper on this computer, then pair it here. Authenticated LAN users can view and control your agents. See LAN_DASHBOARD.md in the source download for setup.</p>
+        <div class="field"><label for="lan-port">Local helper bridge port</label><input id="lan-port" type="number" min="1024" max="65535" value="3211"></div>
+        <div class="field"><label for="lan-token">Pairing token</label><input id="lan-token" type="password" autocomplete="new-password" placeholder="Paste from the helper pairing file; blank keeps the saved token"></div>
+        <div class="actions"><button id="lan-connect" type="button">Save &amp; connect</button><button id="lan-disable" type="button">Disable LAN access</button></div>
+        <p id="lan-status" role="status">Loading LAN settings…</p>
+      </section>
       <section class="card backup-card" aria-labelledby="backup-heading">
         <div class="section-heading">
           <div>
@@ -150,5 +158,6 @@ SPDX-License-Identifier: MPL-2.0 -->
     <script src="settings-backup.js"></script>
     <script src="options.js"></script>
     <script src="summary-options.js"></script>
+    <script src="lan-options.js"></script>
   </body>
 </html>
