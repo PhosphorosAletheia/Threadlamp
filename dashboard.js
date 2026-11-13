@@ -48,6 +48,7 @@
   }
   function badge(agent) { return !agent.online ? "offline" : agent.error ? "error" : agent.logicPhase === "waiting_user" ? "waiting" : ""; }
   function matches(agent) {
+    if ($("hide-unavailable").checked && !agent.online) return false;
     const query = $("search").value.toLowerCase();
     if (!`${agent.title} ${agent.chatTitle || ""} ${agent.url}`.toLowerCase().includes(query)) return false;
     switch ($("filter").value) {
@@ -68,7 +69,7 @@
     $("errors").textContent = agents.filter(a => a.online && a.error).length;
     $("agent-list-count").textContent = agents.filter(matches).length;
     for (const button of document.querySelectorAll("[data-filter]")) button.setAttribute("aria-pressed", String(button.dataset.filter === $("filter").value));
-    const fingerprint = JSON.stringify([selectedKey, busy, $("search").value, $("filter").value,
+    const fingerprint = JSON.stringify([selectedKey, busy, $("search").value, $("filter").value, $("hide-unavailable").checked,
       agents.map(a => [key(a), a.title, a.chatTitle, a.detail, a.online, a.mode, a.logicPhase, a.error, a.paused, a.running, a.count, a.limit, a.summary])]);
     if (cardsFingerprint === fingerprint) return;
     cardsFingerprint = fingerprint;
@@ -478,6 +479,14 @@
   for (const button of document.querySelectorAll("[data-close]")) button.addEventListener("click", () => $(button.dataset.close).close());
   $("queued").addEventListener("input", () => { $("queued-count").textContent = `${$("queued").value.length.toLocaleString()} / 8,000`; });
   $("hb-kind").addEventListener("change", scheduleFields);
+  const availabilityPreference = "threadlamp.dashboard.hideUnavailable";
+  try { $("hide-unavailable").checked = localStorage.getItem(availabilityPreference) === "true"; }
+  catch { /* Filtering remains usable when preference storage is unavailable. */ }
+  $("hide-unavailable").addEventListener("change", () => {
+    try { localStorage.setItem(availabilityPreference, String($("hide-unavailable").checked)); }
+    catch { /* Keep the selected filter for this dashboard session. */ }
+    renderAgents();
+  });
   $("search").addEventListener("input", renderAgents); $("filter").addEventListener("change", renderAgents);
   $("show-dismissed").addEventListener("change", renderEvents);
   $("event-scope").addEventListener("change", renderEvents); $("event-kind").addEventListener("change", renderEvents);

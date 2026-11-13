@@ -79,6 +79,10 @@ For an idle agent, use **Run heartbeat now** beside its status to start its save
 heartbeat immediately. The schedule must be enabled; resolve any pause, error,
 or unsent chat draft first. The same action is available in the Heartbeat tab.
 
+Check **Hide unavailable agents** above the agent list to show only connected
+agents. Your choice is remembered when you reopen the dashboard. Uncheck it to
+show unavailable agents again; hiding an agent does not stop or remove it.
+
 Chats in one project remain separate targets. Offline or changed chats may require
 a refresh of dashboard status before controls can proceed.
 

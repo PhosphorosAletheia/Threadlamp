@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.2 beta 1
+
+- Add a Hide unavailable agents checkbox above the dashboard agent list.
+- Remember the visibility setting when reopening the dashboard.
+
 ## 1.12.1 beta 1
 
 - Add Run heartbeat now beside the selected idle agent’s status.

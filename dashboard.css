@@ -72,7 +72,8 @@ h4 { font-size: 13px; font-weight: 650; }
 .agents-column>.section-title { padding: 0 9px; margin-bottom: 20px; }
 #agents-title .count-badge { margin-left: 5px; vertical-align: middle; }
 .agent-filters { padding: 0 7px 12px; display: grid; gap: 7px; }
-.agent-filters input, .agent-filters select { font-size: 12px; padding: 8px 10px; }
+.availability-filter { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: var(--muted); cursor: pointer; }
+.agent-filters input[type=search], .agent-filters select { font-size: 12px; padding: 8px 10px; }
 .agent-filters select { background: transparent; border-color: transparent; color: var(--muted); padding-left: 2px; }
 .agent-list { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; flex: 1; padding: 2px 2px 16px; }
 .agent-card { margin-bottom: 5px; border: 1px solid transparent; border-radius: 8px; overflow: hidden; }
