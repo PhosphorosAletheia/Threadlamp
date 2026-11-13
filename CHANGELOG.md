@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14.1 beta 1
+
+- Add a visible Reload control to the LAN dashboard for installed full-screen
+  apps, with confirmation before discarding drafts or leaving a pending command.
+- Add Reload page to the LAN sign-in screen. Reloading affects only the dashboard.
+
 ## 1.14.0 beta 1
 
 - Add Android home-screen installation metadata and full-screen launch mode for

@@ -18,7 +18,7 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     bridge.on("message",bytes=>{
       const message=JSON.parse(bytes);if(message.type!=="request")return;
       const r=message.request;let response={ok:true};
-      if(r.type==="DB_LIST")response={ok:true,agents:[agent],events:[],version:"1.13.0"};
+      if(r.type==="DB_LIST")response={ok:true,agents:[agent,{...agent,tabId:18,instanceId:"other-invented-agent",title:"Other Project",url:"https://chatgpt.com/c/other-example"}],events:[],version:"1.13.0"};
       if(r.type==="DB_INSPECT")response={ok:true,schedule:null,connection:null,defaultPrompt:"Check scheduled work."};
       if(r.type==="HA_GET_SETTINGS")response={enabled:false,approvalMessage:"Approved",connection:{phase:"disconnected"}};
       if(r.type==="ALERT_GET_SETTINGS")response={soundEnabled:true};
@@ -48,7 +48,7 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     await evaluate('document.querySelector(".lan-install button").click()');
     assert.equal(await evaluate('window.installCalls'),1,"dismissed prompt cannot be reused");
     await evaluate(`document.getElementById("access-key").value=${JSON.stringify(password)};document.getElementById("login-form").requestSubmit()`);
-    await waitFor('document.querySelectorAll(".agent-select").length === 1');
+    await waitFor('document.querySelectorAll(".agent-select").length === 2');
     assert.equal(await evaluate('typeof chrome.runtime'),"undefined","LAN UI needs no extension API");
     assert.equal(await evaluate('!!document.querySelector(".preferences-body .lan-install")'),true);
     await evaluate('window.dispatchEvent(new Event("appinstalled"))');
@@ -58,6 +58,25 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     await waitFor('document.getElementById("agent-title").textContent === "Example Project"');
     await evaluate('document.getElementById("queued").value="Example LAN message";document.querySelector(\'[data-action="queue"]\').click()');
     await waitFor('document.getElementById("queued").value === ""');assert.equal(actions.length,1);assert.equal(actions[0].payload.text,"Example LAN message");assert.equal(actions[0].target.instanceId,"invented-agent");
+    assert.equal(await evaluate('document.getElementById("refresh").getAttribute("aria-label")'),"Reload dashboard");
+    await evaluate('window.reloadSentinel=true;window.confirm=message=>{window.reloadWarning=message;return false};document.getElementById("queued").value="Keep this draft";document.getElementById("queued").dispatchEvent(new Event("input",{bubbles:true}));document.querySelectorAll(".agent-select")[1].click();document.getElementById("refresh").click()');
+    assert.match(await evaluate('window.reloadWarning'),/Unsent dashboard drafts/);
+    assert.equal(await evaluate('window.reloadSentinel'),true,"cancelled reload preserves document");
+    assert.equal(await evaluate('document.getElementById("queued").value'),"","warning covers a different agent's draft");
+    await evaluate('document.querySelector(".agent-select").click()');
+    assert.equal(await evaluate('document.getElementById("queued").value'),"Keep this draft");
+    await evaluate('LanDashboardAPI.reloadDashboard({pending:true})');
+    assert.match(await evaluate('window.reloadWarning'),/command is still pending/);
+    await evaluate('window.confirm=()=>true;setTimeout(()=>document.getElementById("refresh").click(),0)');
+    await waitFor('!window.reloadSentinel && document.querySelectorAll(".agent-select").length === 2');
+    assert.equal(actions.length,1,"reload never replays a queued command");
+    assert.equal(await evaluate('performance.getEntriesByType("navigation")[0].type'),"reload");
+    await command("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
+    assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'),"reload control fits Android dashboard width");
+    assert.ok(await evaluate('document.getElementById("refresh").getBoundingClientRect().right <= innerWidth'),"reload remains visible");
+    if(process.env.THREADLAMP_RELOAD_SCREENSHOT) {
+      const shot=await command("Page.captureScreenshot",{format:"png"});fs.writeFileSync(process.env.THREADLAMP_RELOAD_SCREENSHOT,Buffer.from(shot.data,"base64"));
+    }
     await command("Emulation.setDeviceMetricsOverride",{width:500,height:900,deviceScaleFactor:1,mobile:true});
     assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'),"mobile LAN dashboard has no horizontal overflow");
     await evaluate('document.getElementById("queued").value="Unsent draft";document.getElementById("queued").dispatchEvent(new Event("input",{bubbles:true}));fetch("/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})');
@@ -70,13 +89,17 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     if(process.env.THREADLAMP_SMOKE_SCREENSHOT) {
       const shot=await command("Page.captureScreenshot",{format:"png"});fs.writeFileSync(process.env.THREADLAMP_SMOKE_SCREENSHOT,Buffer.from(shot.data,"base64"));
     }
+    await evaluate('window.loginReloadSentinel=true;document.getElementById("access-key").value="unsent-key";window.confirm=()=>false;document.getElementById("lan-reload").click()');
+    assert.equal(await evaluate('document.getElementById("access-key").value'),"unsent-key");
+    await evaluate('document.getElementById("access-key").value="";setTimeout(()=>document.getElementById("lan-reload").click(),0)');
+    await waitFor('!window.loginReloadSentinel && !!document.getElementById("lan-reload")');
     const local=path.join(dir,"local");execFileSync(process.execPath,[path.join(__dirname,"dashboard-ui.fixture.js"),local]);
     for(const width of [1440,500]) {
       await command("Emulation.setDeviceMetricsOverride",{width,height:1000,deviceScaleFactor:1,mobile:false});
       await command("Page.navigate",{url:`file://${local}/index.html`});await waitFor('!!document.getElementById("smoke-result")');
       const results=await evaluate('[...document.querySelectorAll("#smoke-result")].map(n=>n.textContent)');assert.equal(results.length,1);assert.match(results[0],/^PASS:/);
     }
-    assert.deepEqual(errors,[]);console.log("PASS: PWA manifest, install prompt and dismissal, installed state, Android-sized login; HTTPS login, real LAN RPC, queue target, mobile layout, session expiry preserves drafts; local dashboard desktop/mobile regression.");
+    assert.deepEqual(errors,[]);console.log("PASS: dashboard/login reload, hidden-agent draft cancellation, pending-command warning, no replay; PWA manifest, install prompt and dismissal, installed state, Android-sized login; HTTPS login, real LAN RPC, queue target, mobile layout, session expiry preserves drafts; local dashboard desktop/mobile regression.");
   } finally {
     cdp?.close();bridge?.terminate();if(chrome && chrome.exitCode === null && chrome.signalCode === null){const closed=once(chrome,"exit");chrome.kill("SIGTERM");await closed;}
     if(helper)await helper.close();fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:200});

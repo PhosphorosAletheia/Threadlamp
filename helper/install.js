@@ -1,6 +1,13 @@
 /* Copyright (c) 2026 Phosphoros Research and contributors. SPDX-License-Identifier: MPL-2.0 */
 (() => {
   "use strict";
+  // Reload only this dashboard document; never send an agent command.
+  globalThis.ThreadlampReloadDashboard = ({unsaved = false, pending = false} = {}) => {
+    const warning = [unsaved ? "Unsent dashboard drafts and unsaved setup changes will be discarded." : "",
+      pending ? "A command is still pending and may finish. Check agent status before retrying it." : ""].filter(Boolean).join("\n\n");
+    if (warning && !window.confirm(`${warning}\n\nReload the dashboard?`)) return;
+    window.location.reload();
+  };
   let prompt = null;
   const installed = () => matchMedia("(display-mode: fullscreen)").matches || matchMedia("(display-mode: standalone)").matches;
   const section = document.createElement("section"); section.className = "lan-install";
@@ -27,5 +34,11 @@
   });
   section.append(title, button, status);
   (document.querySelector(".preferences-body") || document.querySelector("main")).append(section);
+  if (document.getElementById("login-form")) {
+    const reload = document.createElement("button"); reload.type = "button";
+    reload.id = "lan-reload"; reload.textContent = "Reload page";
+    reload.addEventListener("click", () => globalThis.ThreadlampReloadDashboard({unsaved: Boolean(document.getElementById("access-key").value)}));
+    section.append(reload);
+  }
   refresh();
 })();

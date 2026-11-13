@@ -28,11 +28,15 @@
   }
   globalThis.LanDashboardAPI = {
     sendMessage,
+    reloadDashboard: options => globalThis.ThreadlampReloadDashboard(options),
     requestLoopbackPermission: async () => (await checked({type:"LAN_LOOPBACK_PERMISSION"})).granted,
     openChat: agent => checked({type:"LAN_OPEN_CHAT",target:target(agent)}),
     openSettings: () => checked({type:"LAN_OPEN_OPTIONS"})
   };
   document.addEventListener("DOMContentLoaded", () => {
+    const reload = document.getElementById("refresh");
+    reload.textContent = "Reload"; reload.classList.remove("icon-button");
+    reload.title = "Reload dashboard"; reload.setAttribute("aria-label", "Reload dashboard");
     document.getElementById("settings").textContent = "Open settings on host";
     document.getElementById("open-chat").textContent = "Open chat on host ↗";
     const logout = document.createElement("button"); logout.type = "button"; logout.textContent = "Sign out";

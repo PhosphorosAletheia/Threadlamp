@@ -80,6 +80,12 @@ reloading the extension is unnecessary for a helper-only update.
 
 ## Disconnect and recover
 
+- Use **Reload** in the dashboard header to reload the page from full-screen
+  mode. It warns before discarding unsent drafts (including other agents' drafts),
+  unsaved setup changes, or leaving a pending command. Cancel to save your text
+  first. The sign-in page also has **Reload page**. Reloading does not refresh
+  host chat tabs or resend commands; inspect an uncertain command before retrying.
+
 - Choose **Sign out** on a shared device. Sessions expire after 12 hours and
   are invalidated when the helper restarts. Unsent drafts remain on screen after
   expiry so you can save them before signing in again.

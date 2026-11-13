@@ -461,7 +461,15 @@
       $("approval-preview").textContent = `Approval sends: ${approvalMessage}`;
     } catch (error) { notice(error.message, true); }
   }
-  $("refresh").addEventListener("click", () => { lastInspection = 0; lastSettings = 0; void refresh(); });
+  $("refresh").addEventListener("click", () => {
+    if (api.reloadDashboard) {
+      const unsaved = [...drafts.values()].some(state => Object.keys(state).length > 0)
+        || Boolean($("queued").value || $("reply").value || $("broadcast-text").value);
+      api.reloadDashboard({unsaved, pending: busy});
+      return;
+    }
+    lastInspection = 0; lastSettings = 0; void refresh();
+  });
   for (const button of document.querySelectorAll("[role=tab]")) {
     button.addEventListener("click", () => showPanel(button.dataset.panel));
     button.addEventListener("keydown", event => {
