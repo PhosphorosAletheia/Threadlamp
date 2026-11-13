@@ -221,7 +221,26 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     const element = snapshot.element;
     const identified = element?.getAttribute("data-message-id") ? element
       : element?.closest("[data-message-id]") || element?.querySelector?.("[data-message-id]");
-    return identified?.getAttribute("data-message-id") || "";
+    const legacyId = identified?.getAttribute("data-message-id");
+    if (legacyId) return legacyId;
+    // Newer ChatGPT layouts expose message IDs on a search wrapper rather
+    // than the message bubble. Accept only one UUID belonging to this turn;
+    // a multi-message/search-group ID cannot establish conversation continuity.
+    const wrapper = element?.closest("[data-chatgpt-search-message-ids]");
+    if (!wrapper) return "";
+    const roles = "[data-message-author-role], [data-conversation-role], [data-user-message-bubble='true']";
+    const nodes = [...wrapper.querySelectorAll(roles)];
+    if (wrapper.matches?.(roles)) nodes.unshift(wrapper);
+    const turns = nodes.filter(node => !nodes.some(other => other !== node && other.contains(node)));
+    if (turns.length !== 1 || !(turns[0] === element || turns[0].contains(element) || element?.contains(turns[0]))) return "";
+    const raw = wrapper.getAttribute("data-chatgpt-search-message-ids")?.trim();
+    if (!raw) return "";
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { parsed = raw; }
+    const ids = Array.isArray(parsed) ? parsed : [parsed];
+    if (ids.length !== 1 || typeof ids[0] !== "string"
+      || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(ids[0])) return "";
+    return ids[0].toLowerCase();
   }
 
   async function reconnectUserHash(snapshot) {
@@ -2815,13 +2834,16 @@ ${LOGIC_START_PROMPT}
       return;
     }
     const origin = new URL(owner.url).origin;
-    const oldChat = new URL(owner.url).pathname.match(/\/c\/([^/]+)/)?.[1];
+    const oldChatSegment = new URL(owner.url).pathname.match(/\/c\/([^/]+)/)?.[1];
+    let sourceIsUnsaved = !oldChatSegment;
+    try { if (oldChatSegment) sourceIsUnsaved = /^local-chatgpt:/i.test(decodeURIComponent(oldChatSegment)); }
+    catch { /* Malformed encoded IDs cannot authorize a new destination. */ }
     const candidate = () => {
       const current = new URL(window.location.href);
       const currentProject = projectSegmentFromLocation();
       const oldProject = projectSegmentFromLocation(owner.url);
       return current.origin === origin && /\/c\/[^/]+/.test(current.pathname)
-        && (!oldChat || oldChat.startsWith("local-chatgpt:"))
+        && sourceIsUnsaved
         && (oldProject ? sameRolloverProject(oldProject, currentProject) : !currentProject);
     };
     // A previously observed message ID proves continuity after a delayed URL

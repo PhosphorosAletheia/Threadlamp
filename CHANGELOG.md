@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.13.1 beta 1
+
+- Recognize the message IDs in newer ChatGPT page layouts so Logic Mode can
+  follow a verified new chat when its permanent URL appears after the first response.
+- Handle encoded temporary conversation URLs during that transition.
+- Keep ambiguous message identities, changed projects, and unrelated saved-chat
+  navigation blocked.
+
 ## 1.13.0 beta 1
 
 - Add an optional HTTPS LAN helper with sign-in and full dashboard controls.

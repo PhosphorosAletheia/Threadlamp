@@ -81,11 +81,14 @@ const { visibleElement } = require("./rollover.test.js");
   // Delivery can be observed on the project landing page long before ChatGPT
   // assigns the saved URL. Keep proof of that message, not just its prompt text.
   for (const scenario of ["delayed", "long-delay", "local", "render-late", "handoff", "no-id", "wrong-id",
+    "modern-id", "modern-plain-id", "modern-wrong-id", "modern-multiple-ids", "modern-mixed-turns", "encoded-local", "encoded-local-lower", "invalid-local",
     "wrong-text", "cross-project", "cross-origin", "saved-to-saved", "second-hop", "cancelled"]) {
     const f = fixture(["continue", "idle"]); f.hide();
     const home = `https://chatgpt.com/g/${project}/project`;
     const saved = `https://chatgpt.com/g/${project}/c/saved`;
     f.window.location = new URL(scenario === "saved-to-saved" ? saved + "-original"
+      : scenario === "invalid-local" ? `https://chatgpt.com/g/${project}/c/local-chatgpt:%ZZ`
+      : scenario.startsWith("encoded-local") ? `https://chatgpt.com/g/${project}/c/local-chatgpt${scenario.endsWith("lower") ? "%3a" : "%3A"}temporary`
       : scenario === "local" ? `https://chatgpt.com/g/${project}/c/local-chatgpt:temporary` : home);
     if (scenario === "local") {
       assert.equal(f.api.queueAdditionalPrompt("First queued"), true);
@@ -110,11 +113,23 @@ const { visibleElement } = require("./rollover.test.js");
           : {ok:true};
       });
     }
+    let modernWrapper;
+    const modernId = "01234567-89ab-4cde-8f01-23456789abcd", otherId = "abcdef01-2345-4678-9abc-def012345678";
     const click = f.send.click;
     f.send.click = () => {
       click();
       if (f.sends.length !== 1) return;
       if (scenario === "no-id") f.user().getAttribute = () => null;
+      if (scenario.startsWith("modern-")) {
+        const user = f.user();
+        user.getAttribute = () => null;
+        let value = scenario === "modern-multiple-ids" ? JSON.stringify([modernId, otherId])
+          : scenario === "modern-plain-id" ? modernId : JSON.stringify([modernId]);
+        modernWrapper = {getAttribute: () => value, matches: () => false,
+          querySelectorAll: () => scenario === "modern-mixed-turns" ? [user, f.assistant()] : [user],
+          changeId: () => { value = JSON.stringify([otherId]); }};
+        user.closest = selector => selector === "[data-chatgpt-search-message-ids]" ? modernWrapper : null;
+      }
       f.onTick(() => {
         f.advanceClock(scenario === "long-delay" ? 10 * 60 * 1000 : 9000);
         const target = scenario === "cross-project" ? saved.replace("0123", "abcd")
@@ -124,6 +139,7 @@ const { visibleElement } = require("./rollover.test.js");
           const text = f.user().textContent;
           f.newUser(); f.user().textContent = f.user().innerText = text;
         }
+        if (scenario === "modern-wrong-id") modernWrapper.changeId();
         if (scenario === "wrong-text") f.user().textContent = "Different instructions";
         if (scenario === "render-late") absent = true;
         if (scenario === "cancelled") { f.api.state.running = false; f.api.state.runId++; }
@@ -136,7 +152,7 @@ const { visibleElement } = require("./rollover.test.js");
     };
     await f.api.runLogicMode(1, false, "Initial continuation", "Starting", scenario === "handoff"
       ? {failureId:"receipt", projectSegment:project, sourceUrl:`https://chatgpt.com/g/${project}/c/source`} : null);
-    const allowed = ["delayed", "long-delay", "local", "render-late", "handoff"].includes(scenario);
+    const allowed = ["delayed", "long-delay", "local", "render-late", "handoff", "modern-id", "modern-plain-id", "encoded-local", "encoded-local-lower"].includes(scenario);
     const expected = scenario === "local" ? ["Initial continuation\n\nAdditional instructions from the user for this round:\nFirst queued",
       "Configured followup\n\nAdditional instructions from the user for this round:\nSecond queued"]
       : allowed ? ["Initial continuation", "Configured followup"] : ["Initial continuation"];
