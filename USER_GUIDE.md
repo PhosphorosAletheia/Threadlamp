@@ -75,6 +75,10 @@ entry is not replayed automatically; later entries remain queued for review.
 Open **Open agent dashboard** from the popup. The dashboard lists eligible chats
 in this Chrome profile, with input requests and errors prioritized. Select a chat
 to view status, pause/resume it, queue instructions, reply, or manage its schedule.
+For an idle agent, use **Run heartbeat now** beside its status to start its saved
+heartbeat immediately. The schedule must be enabled; resolve any pause, error,
+or unsent chat draft first. The same action is available in the Heartbeat tab.
+
 Chats in one project remain separate targets. Offline or changed chats may require
 a refresh of dashboard status before controls can proceed.
 

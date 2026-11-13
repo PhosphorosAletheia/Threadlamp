@@ -183,6 +183,10 @@
     $("reply-badge").hidden = !(agent.online && agent.logicPhase === "waiting_user");
     $("review-input").hidden = $("reply-badge").hidden;
     $("input-brief").textContent = agent.logicPhase === "waiting_user" ? agent.userInputBrief || "The agent is waiting. Review its request in ChatGPT before replying." : "No active input request.";
+    const heartbeatIdle = !agent.running || agent.logicPhase === "sleeping";
+    const canRunHeartbeat = heartbeatIdle && !agent.paused && !agent.error && !agent.generating && !agent.hasDraft
+      && agent.logicPhase !== "waiting_user" && schedule?.enabled && !schedule.suspendUntilIdle && !schedule.pendingDestination
+      && !["paused", "blocked", "disabled", "dispatching", "awaiting_idle"].includes(schedule.phase);
     for (const button of document.querySelectorAll("#detail [data-action]")) {
       const action = button.dataset.action;
       let allowed = Boolean(agent.online);
@@ -191,10 +195,13 @@
       else if (action.startsWith("server_")) allowed &&= /\/g\/g-p-/.test(agent.url) && Boolean(Heartbeat.canonicalUrl(agent.url)) && inspectedKey === selectedKey
         && (["server_setup", "server_recover"].includes(action) || Boolean(connection));
       else allowed &&= Boolean(agent.capabilities?.[action]);
+      if (action === "heartbeat_run") allowed &&= canRunHeartbeat;
       if (action === "queue") allowed &&= Array.isArray(agent.queuedPrompts);
       button.disabled = busy || !allowed;
       button.title = !allowed ? "Unavailable in the agent's current state. Review its status above." : "";
-      if (button.closest(".run-actions")) button.hidden = action === "resume" ? !agent.paused
+      if (action === "heartbeat_run" && !allowed) button.title = "Requires an idle agent with an enabled heartbeat, no pause or error, and no unsent chat draft.";
+      if (button.closest(".run-actions")) button.hidden = action === "heartbeat_run" ? !agent.online || !heartbeatIdle
+        : action === "resume" ? !agent.paused
         : action === "pause" ? Boolean(agent.paused) : action === "next_cycle" ? !agent.capabilities?.next_cycle : false;
     }
     $("open-chat").disabled = !agent.online;

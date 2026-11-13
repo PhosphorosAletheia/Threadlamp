@@ -38,7 +38,7 @@ SPDX-License-Identifier: MPL-2.0 -->
         <div class="workspace-header">
           <button id="back-to-agents" class="text-button mobile-only">← All agents</button>
           <div class="section-title"><div class="agent-heading"><p class="eyebrow">AGENT WORKSPACE</p><h2 id="agent-title"></h2><p id="chat-title" class="chat-title muted"></p></div><button id="open-chat" class="quiet">Open chat ↗</button></div>
-          <div class="status-strip"><span id="agent-phase" class="pill"></span><span id="agent-count" class="small muted"></span><div class="run-actions"><button data-action="pause">Pause</button><button data-action="resume">Resume</button><button data-action="next_cycle">Next cycle</button><button data-action="stop" class="danger">Stop</button></div></div>
+          <div class="status-strip"><span id="agent-phase" class="pill"></span><span id="agent-count" class="small muted"></span><div class="run-actions"><button data-action="pause">Pause</button><button data-action="resume">Resume</button><button data-action="next_cycle">Next cycle</button><button id="heartbeat-run-now" data-action="heartbeat_run">Run heartbeat now</button><button data-action="stop" class="danger">Stop</button></div></div>
           <p id="agent-detail" class="status-detail"></p>
           <div class="status-meta"><p id="agent-timing" class="muted small"></p><button id="review-input" class="text-button" hidden>Reply to request →</button><details class="identity"><summary>Chat link</summary><p id="agent-url" class="url"></p></details></div>
           <p id="agent-guard" class="guard"></p>

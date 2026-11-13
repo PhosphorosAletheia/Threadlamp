@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.1 beta 1
+
+- Add Run heartbeat now beside the selected idle agent’s status.
+- Enable the shortcut only when its heartbeat schedule and chat are ready; retain
+  the existing conversation, draft, and duplicate-dispatch checks.
+
 ## 1.12.0 beta 1
 
 - Queue multiple messages without replacing unsent entries. Send them in order,

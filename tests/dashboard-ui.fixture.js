@@ -30,11 +30,12 @@ function mock() {
   agents[2].summary = { status: "pending", last: null };
   const events = [{ id: "event-1", at: Date.now(), agentKey: `18:build:${agents[1].url}`, tabId: 18, title: agents[1].title, kind: "input", detail: agents[1].detail },
     { id: "event-2", at: Date.now() - 120000, agentKey: `19:schedule:${agents[2].url}`, tabId: 19, title: agents[2].title, kind: "status", detail: agents[2].detail }];
-  const configuration = { kind: "interval", intervalMinutes: 60, times: [], days: [], timeZone: "America/Chicago", prompt: "Check the next scheduled tasks.", limit: 5, phase: "sleeping", detail: "Waiting for next cycle." };
+  const configuration = { enabled:true, kind: "interval", intervalMinutes: 60, times: [], days: [], timeZone: "America/Chicago", prompt: "Check the next scheduled tasks.", limit: 5, phase: "sleeping", detail: "Waiting for next cycle." };
+  let inspectedSchedule = configuration;
   globalThis.chrome = {
     runtime: { openOptionsPage: async () => {}, sendMessage: async request => {
-      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.12.0" });
-      if (request.type === "DB_INSPECT") return { ok: true, schedule: configuration, connection: null, defaultPrompt: "Do the scheduled work." };
+      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.12.1" });
+      if (request.type === "DB_INSPECT") return { ok: true, schedule: inspectedSchedule, connection: null, defaultPrompt: "Do the scheduled work." };
       if (request.type === "ALERT_GET_SETTINGS") return { soundEnabled: true };
       if (request.type === "HA_GET_SETTINGS") return { enabled: true, connection: { phase: "connected" }, approvalMessage: "Approved. Continue with the current task." };
       if (request.type === "DB_DISMISS") { events.find(e => e.id === request.eventId).dismissed = true; return { ok: true }; }
@@ -53,6 +54,7 @@ function mock() {
           agent.queuedPrompts = agent.queuedPrompts.filter(item => item.id !== request.payload.id);
           agent.queuedPrompt = agent.queuedPrompts[0]?.text || "";
         }
+        if (request.action === "heartbeat_run") { agent.running = true; agent.logicPhase = "monitoring"; }
         if (request.action === "pause") { agent.paused = true; agent.capabilities = { ...agent.capabilities, pause: false, resume: true }; }
         if (request.action === "resume") { agent.paused = false; agent.capabilities = { ...agent.capabilities, pause: true, resume: false }; }
         if (request.action === "cancel_queue") { agent.queuedPrompts = []; agent.queuedPrompt = ""; agent.capabilities = { ...agent.capabilities, cancel_queue: false }; }
@@ -142,7 +144,30 @@ function mock() {
       assert($("queued").value === "Unsent dashboard draft", "Switching agents preserves unsent dashboard drafts");
       await select(20);
       assert([...document.querySelectorAll("#detail [data-action]")].every(button => button.disabled), "Offline agent has no enabled controls");
+      await select(19);
+      const runHeartbeat = $("heartbeat-run-now");
+      assert(visible(runHeartbeat) && !runHeartbeat.disabled, "Sleeping agent exposes its heartbeat shortcut without opening a tool tab");
+      const priorActions = actions.length;
+      click("#heartbeat-run-now"); runHeartbeat.click(); await wait();
+      assert(actions.length === priorActions + 1 && actions.at(-1).action === "heartbeat_run" && actions.at(-1).target.tabId === 19,
+        "Shortcut sends exactly one guarded heartbeat command to the selected agent");
+      assert(!visible(runHeartbeat), "Shortcut hides when the agent starts working");
+      agents[2].logicPhase = "sleeping";
+      for (const flag of ["paused", "error", "generating", "hasDraft"]) {
+        agents[2][flag] = true; click("#refresh"); await wait();
+        assert(runHeartbeat.disabled, `Heartbeat shortcut protects ${flag}`);
+        delete agents[2][flag];
+      }
+      for (const saved of [null, {...configuration,enabled:false}, {...configuration,phase:"paused"}, {...configuration,suspendUntilIdle:true}]) {
+        inspectedSchedule = saved; click("#refresh"); await wait();
+        assert(runHeartbeat.disabled, "Unavailable or paused schedules cannot run from the shortcut");
+      }
+      inspectedSchedule = configuration; agents[2].running = false; agents[2].logicPhase = "idle";
+      click("#refresh"); await wait();
+      assert(visible(runHeartbeat) && !runHeartbeat.disabled, "Stopped idle agent can run its enabled heartbeat");
+      agents[2].running = true; agents[2].logicPhase = "sleeping";
       await select(17);
+      assert(!visible(runHeartbeat), "Working agent has no idle shortcut");
       tab("heartbeat");
       input("hb-prompt", "Run scheduled checks."); click("[data-action='heartbeat_save']"); await wait();
       assert(actions.at(-1).action === "heartbeat_save", "Heartbeat control works");
@@ -238,11 +263,12 @@ function mock() {
         assert(queueButton.bottom <= document.querySelector(".app-status").getBoundingClientRect().top, "Primary queue action is above the fold on laptop screens");
       }
       assert(errors.length === 0, errors.join("; "));
-      const report = document.createElement("pre"); report.id = "smoke-result"; report.textContent = "PASS: multi-entry add/remove, literal text rendering, project selection, priority ordering, tabs, keyboard, queue, broadcasts, partial results, deduplication, reply, approvals, pause/resume, heartbeat, activity filters, dialogs, focus, offline guards, draft retention, viewport layout; no browser errors";
+      const report = document.createElement("pre"); report.id = "smoke-result"; report.textContent = "PASS: idle heartbeat shortcut and guards, multi-entry add/remove, literal text rendering, project selection, priority ordering, tabs, keyboard, queue, broadcasts, partial results, deduplication, reply, approvals, pause/resume, heartbeat, activity filters, dialogs, focus, offline guards, draft retention, viewport layout; no browser errors";
       report.hidden = true; document.body.append(report);
       // Optional screenshot views use the same tested mock, never real chats.
       const preview = new URLSearchParams(location.search).get("preview");
       if (preview === "queue") $("queue-preview").scrollIntoView({block:"start"});
+      if (preview === "heartbeat") await select(19);
       if (preview === "reply") await select(18);
       if (preview === "broadcast") { if (innerWidth <= 720 && document.body.dataset.mobileView !== "agents") click("#back-to-agents"); click("#broadcast-open"); click("#broadcast-new"); input("broadcast-text", "Please include a brief progress summary in your next response."); }
       if (preview === "activity") click("#activity-toggle");
