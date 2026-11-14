@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.14.2 beta 1
+
+- Resize the installed LAN dashboard when the visible viewport changes.
+- Draw the header and footer to the screen edges while keeping controls inside
+  changing safe-area insets, avoiding a separate blank strip above the header.
+- Preserve normal layout during pinch zoom and restore browser sizing on exit.
+
 ## 1.14.1 beta 1
 
 - Add a visible Reload control to the LAN dashboard for installed full-screen

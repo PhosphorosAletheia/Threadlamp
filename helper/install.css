@@ -3,8 +3,40 @@
 .lan-install h3 { font: inherit; font-weight: 600; margin: 0 0 12px; }
 .lan-install p { color: #b3b3b3; font-size: 13px; line-height: 1.5; margin: 12px 0 0; }
 .lan-install [hidden] { display: none !important; }
-@media (display-mode: fullscreen) {
-  body { box-sizing: border-box; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+html.lan-installed {
+  --lan-safe-top: env(safe-area-inset-top, 0px);
+  --lan-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --lan-safe-left: env(safe-area-inset-left, 0px);
+  --lan-safe-right: env(safe-area-inset-right, 0px);
+}
+html.lan-installed body[data-mobile-view] {
+  height: var(--lan-viewport-height, 100dvh);
+  padding: 0;
+  grid-template-rows: calc(64px + var(--lan-safe-top)) 46px minmax(0, 1fr) auto;
+}
+html.lan-installed .topbar {
+  padding-top: var(--lan-safe-top);
+  padding-left: calc(24px + var(--lan-safe-left));
+  padding-right: calc(24px + var(--lan-safe-right));
+}
+html.lan-installed .layout {
+  padding-left: max(var(--lan-safe-left), 0px);
+  padding-right: max(var(--lan-safe-right), 0px);
+}
+html.lan-installed .fleet-bar {
+  padding-left: calc(24px + var(--lan-safe-left));
+  padding-right: calc(24px + var(--lan-safe-right));
+}
+html.lan-installed .app-status {
+  padding-bottom: calc(7px + var(--lan-safe-bottom));
+  padding-left: calc(20px + var(--lan-safe-left));
+  padding-right: calc(20px + var(--lan-safe-right));
+}
+@media (max-width: 720px) {
+  html.lan-installed body[data-mobile-view] { grid-template-rows: calc(58px + var(--lan-safe-top)) 44px minmax(0, 1fr) auto; }
+  html.lan-installed .topbar { padding-left: calc(14px + var(--lan-safe-left)); padding-right: calc(14px + var(--lan-safe-right)); }
+  html.lan-installed .app-status { padding-bottom: calc(6px + var(--lan-safe-bottom)); padding-left: calc(14px + var(--lan-safe-left)); padding-right: calc(14px + var(--lan-safe-right)); }
+  html.lan-installed .fleet-bar { padding-left: calc(9px + var(--lan-safe-left)); padding-right: calc(9px + var(--lan-safe-right)); }
 }
 
 #lan-reload { margin-top: 18px; }

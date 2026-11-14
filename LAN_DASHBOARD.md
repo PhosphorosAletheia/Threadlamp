@@ -72,6 +72,10 @@ Browser/device support and access to a private LAN origin can affect installatio
 if only a browser shortcut is offered, it may not launch full screen. Android
 installation must be checked on your actual device.
 
+The installed dashboard follows viewport size changes as system bars or the
+keyboard appear and disappear. Its header and footer draw to the viewport edges;
+controls retain safe spacing around camera cutouts and system bars.
+
 The app stays on your LAN and uses the same sign-in and session expiry as the
 browser dashboard. Chrome, the extension, and the helper still run on the host.
 It has no offline command queue, background sync, or service-worker cache of

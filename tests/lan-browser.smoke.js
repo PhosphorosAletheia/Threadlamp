@@ -74,6 +74,29 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     await command("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
     assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'),"reload control fits Android dashboard width");
     assert.ok(await evaluate('document.getElementById("refresh").getBoundingClientRect().right <= innerWidth'),"reload remains visible");
+    const fullscreen=await command("Runtime.evaluate",{expression:"document.documentElement.requestFullscreen()",awaitPromise:true,userGesture:true});
+    assert.equal(fullscreen.exceptionDetails,undefined);
+    await waitFor('document.documentElement.classList.contains("lan-installed")');
+    for(const [height,top,bottom] of [[820,24,16],[844,0,0],[820,24,16],[540,0,0],[844,0,0]]) {
+      await command("Emulation.setSafeAreaInsetsOverride",{insets:{top,bottom,left:0,right:0}});
+      await command("Emulation.setDeviceMetricsOverride",{width:390,height,deviceScaleFactor:1,mobile:true});
+      await waitFor('Math.abs(document.body.getBoundingClientRect().height - visualViewport.height) < 1');
+      const geometry=await evaluate('({top:document.querySelector(".topbar").getBoundingClientRect().top,header:document.querySelector(".topbar").getBoundingClientRect().height,bottom:document.querySelector(".app-status").getBoundingClientRect().bottom,viewport:visualViewport.height,padding:getComputedStyle(document.body).paddingTop})');
+      assert.equal(geometry.top,0,"header paints from the viewport edge without a blank strip");
+      assert.equal(geometry.header,58+top,"safe inset stays inside the header and updates dynamically");
+      assert.equal(geometry.padding,"0px");
+      assert.ok(Math.abs(geometry.bottom-geometry.viewport)<1,"footer fills the changing viewport");
+    }
+    await command("Emulation.setPageScaleFactor",{pageScaleFactor:2});
+    await waitFor('Math.abs(document.body.getBoundingClientRect().height-innerHeight)<1');
+    await command("Emulation.setPageScaleFactor",{pageScaleFactor:1});
+    await waitFor('Math.abs(document.body.getBoundingClientRect().height-visualViewport.height)<1');
+    if(process.env.THREADLAMP_VIEWPORT_SCREENSHOT) {
+      const shot=await command("Page.captureScreenshot",{format:"png"});fs.writeFileSync(process.env.THREADLAMP_VIEWPORT_SCREENSHOT,Buffer.from(shot.data,"base64"));
+    }
+    await evaluate('document.exitFullscreen()');
+    await waitFor('!document.documentElement.classList.contains("lan-installed")');
+    assert.equal(await evaluate('document.documentElement.style.getPropertyValue("--lan-viewport-height")'),"");
     if(process.env.THREADLAMP_RELOAD_SCREENSHOT) {
       const shot=await command("Page.captureScreenshot",{format:"png"});fs.writeFileSync(process.env.THREADLAMP_RELOAD_SCREENSHOT,Buffer.from(shot.data,"base64"));
     }
@@ -99,7 +122,7 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
       await command("Page.navigate",{url:`file://${local}/index.html`});await waitFor('!!document.getElementById("smoke-result")');
       const results=await evaluate('[...document.querySelectorAll("#smoke-result")].map(n=>n.textContent)');assert.equal(results.length,1);assert.match(results[0],/^PASS:/);
     }
-    assert.deepEqual(errors,[]);console.log("PASS: dashboard/login reload, hidden-agent draft cancellation, pending-command warning, no replay; PWA manifest, install prompt and dismissal, installed state, Android-sized login; HTTPS login, real LAN RPC, queue target, mobile layout, session expiry preserves drafts; local dashboard desktop/mobile regression.");
+    assert.deepEqual(errors,[]);console.log("PASS: full-screen dynamic viewport/insets, keyboard-sized viewport, zoom and fullscreen exit; dashboard/login reload, hidden-agent draft cancellation, pending-command warning, no replay; PWA manifest, install prompt and dismissal, installed state, Android-sized login; HTTPS login, real LAN RPC, queue target, mobile layout, session expiry preserves drafts; local dashboard desktop/mobile regression.");
   } finally {
     cdp?.close();bridge?.terminate();if(chrome && chrome.exitCode === null && chrome.signalCode === null){const closed=once(chrome,"exit");chrome.kill("SIGTERM");await closed;}
     if(helper)await helper.close();fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:200});

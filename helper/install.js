@@ -9,7 +9,31 @@
     window.location.reload();
   };
   let prompt = null;
-  const installed = () => matchMedia("(display-mode: fullscreen)").matches || matchMedia("(display-mode: standalone)").matches;
+  const fullScreenMode = matchMedia("(display-mode: fullscreen)");
+  const standaloneMode = matchMedia("(display-mode: standalone)");
+  const installed = () => fullScreenMode.matches || standaloneMode.matches;
+  // Android can resize the visible viewport as system bars or the keyboard move.
+  // Paint the full viewport while keeping safe insets inside the edge controls.
+  let viewportFrame = 0;
+  function syncViewport() {
+    viewportFrame = 0;
+    const root = document.documentElement;
+    root.classList.toggle("lan-installed", installed());
+    if (!installed()) { root.style.removeProperty("--lan-viewport-height"); return; }
+    const viewport = window.visualViewport;
+    // Pinch zoom must not shrink and reflow the application's layout.
+    const height = viewport && Math.abs(viewport.scale - 1) < 0.01 ? viewport.height : window.innerHeight;
+    if (height > 0) root.style.setProperty("--lan-viewport-height", `${height}px`);
+  }
+  function scheduleViewport() {
+    if (!viewportFrame) viewportFrame = requestAnimationFrame(syncViewport);
+  }
+  for (const event of ["resize", "orientationchange", "pageshow"]) window.addEventListener(event, scheduleViewport);
+  document.addEventListener("visibilitychange", scheduleViewport);
+  window.visualViewport?.addEventListener("resize", scheduleViewport);
+  fullScreenMode.addEventListener("change", scheduleViewport);
+  standaloneMode.addEventListener("change", scheduleViewport);
+  syncViewport();
   const section = document.createElement("section"); section.className = "lan-install";
   const title = document.createElement("h3"); title.textContent = "Install on this device";
   const button = document.createElement("button"); button.type = "button"; button.textContent = "Install Threadlamp";
