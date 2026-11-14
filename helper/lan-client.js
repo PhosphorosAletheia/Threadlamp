@@ -12,7 +12,7 @@
         document.getElementById("connection").textContent = "Signed out";
         const link = document.getElementById("lan-sign-in");
         if (link) link.hidden = false;
-        throw new Error("LAN session expired. Save any unsent dashboard drafts before signing in again.");
+        throw new Error("LAN session expired. Save any unsent dashboard drafts, then open Settings to sign in again.");
       }
       return await response.json();
     } catch (error) {
@@ -39,7 +39,8 @@
     reload.title = "Reload dashboard"; reload.setAttribute("aria-label", "Reload dashboard");
     document.getElementById("settings").textContent = "Open settings on host";
     document.getElementById("open-chat").textContent = "Open chat on host ↗";
-    const logout = document.createElement("button"); logout.type = "button"; logout.textContent = "Sign out";
+    document.querySelector(".brand").setAttribute("aria-label", "Threadlamp Agent workspace");
+    const logout = document.createElement("button"); logout.id = "lan-sign-out"; logout.type = "button"; logout.textContent = "Sign out";
     logout.addEventListener("click", async () => {
       try {
         const response = await fetch("/logout", {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
@@ -48,6 +49,9 @@
       } catch (error) { document.getElementById("notice").textContent = error.message; }
     });
     const login = Object.assign(document.createElement("a"), {id:"lan-sign-in",href:"/login",textContent:"Sign in again",hidden:true});
-    document.querySelector(".top-actions").append(login, logout);
+    const session = document.createElement("section"); session.className = "lan-install";
+    const heading = document.createElement("h3"); heading.textContent = "LAN session";
+    session.append(heading, login, logout);
+    document.querySelector(".preferences-body").append(session);
   });
 })();

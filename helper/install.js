@@ -12,6 +12,14 @@
   const fullScreenMode = matchMedia("(display-mode: fullscreen)");
   const standaloneMode = matchMedia("(display-mode: standalone)");
   const installed = () => fullScreenMode.matches || standaloneMode.matches;
+  const cameraLayouts = ["safe", "right", "left"];
+  const cameraKey = "threadlamp.camera-layout";
+  let cameraLayout = "safe";
+  try {
+    const saved = localStorage.getItem(cameraKey);
+    if (cameraLayouts.includes(saved)) cameraLayout = saved;
+  } catch { /* Keep the safe default when device storage is unavailable. */ }
+  document.documentElement.dataset.lanCamera = cameraLayout;
   // Android can resize the visible viewport as system bars or the keyboard move.
   // Paint the full viewport while keeping safe insets inside the edge controls.
   let viewportFrame = 0;
@@ -58,6 +66,26 @@
   });
   section.append(title, button, status);
   (document.querySelector(".preferences-body") || document.querySelector("main")).append(section);
+  if (document.querySelector(".preferences-body")) {
+    const display = document.createElement("section"); display.className = "lan-install";
+    const label = document.createElement("label"); label.htmlFor = "lan-camera-layout"; label.textContent = "Installed app header";
+    const select = document.createElement("select"); select.id = label.htmlFor;
+    for (const [value, text] of [["safe", "Below camera (default)"], ["right", "Beside right camera"], ["left", "Beside left camera"]]) {
+      select.add(new Option(text, value));
+    }
+    select.value = cameraLayout;
+    const help = document.createElement("p"); help.id = "lan-camera-help";
+    help.textContent = "Choose the side of your camera for a compact header in portrait mode. For a centered or wide notch, keep Below camera. Saved only on this device.";
+    select.setAttribute("aria-describedby", help.id);
+    select.addEventListener("change", () => {
+      cameraLayout = cameraLayouts.includes(select.value) ? select.value : "safe";
+      document.documentElement.dataset.lanCamera = cameraLayout;
+      try { localStorage.setItem(cameraKey, cameraLayout); }
+      catch { help.textContent = "Applied for this page. Device storage is unavailable, so this choice cannot be saved."; }
+    });
+    display.append(label, select, help);
+    section.before(display);
+  }
   if (document.getElementById("login-form")) {
     const reload = document.createElement("button"); reload.type = "button";
     reload.id = "lan-reload"; reload.textContent = "Reload page";

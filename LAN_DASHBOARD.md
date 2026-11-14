@@ -76,6 +76,14 @@ The installed dashboard follows viewport size changes as system bars or the
 keyboard appear and disappear. Its header and footer draw to the viewport edges;
 controls retain safe spacing around camera cutouts and system bars.
 
+For a corner camera, choose **Settings → Installed app header → Beside right
+camera** or **Beside left camera**. This puts the compact header alongside the
+camera instead of leaving a full-width strip above it. The choice is saved only
+on this device and applies in portrait mode on screens 360–720 CSS pixels wide.
+For a centered or wide notch, keep **Below camera (default)**; use that setting
+also if any control is obscured. Landscape and narrower screens keep the full
+safe-area layout.
+
 The app stays on your LAN and uses the same sign-in and session expiry as the
 browser dashboard. Chrome, the extension, and the helper still run on the host.
 It has no offline command queue, background sync, or service-worker cache of
@@ -90,9 +98,9 @@ reloading the extension is unnecessary for a helper-only update.
   first. The sign-in page also has **Reload page**. Reloading does not refresh
   host chat tabs or resend commands; inspect an uncertain command before retrying.
 
-- Choose **Sign out** on a shared device. Sessions expire after 12 hours and
+- Choose **Settings → Sign out** on a shared device. Sessions expire after 12 hours and
   are invalidated when the helper restarts. Unsent drafts remain on screen after
-  expiry so you can save them before signing in again.
+  expiry so you can save them before choosing **Settings → Sign in again**.
 - Choose **Disable LAN access** in extension settings to revoke the bridge, or
   stop the helper with Ctrl+C. Disabling preserves the saved pairing token.
 - If a command times out or disconnects, inspect the agent before retrying. The

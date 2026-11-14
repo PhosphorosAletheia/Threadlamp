@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14.3 beta 1
+
+- Add a saved compact header option beside a left or right corner camera in the
+  installed LAN dashboard. Keep the default layout for centered or wide notches.
+- Move LAN Sign out and session recovery into Settings.
+
 ## 1.14.2 beta 1
 
 - Resize the installed LAN dashboard when the visible viewport changes.

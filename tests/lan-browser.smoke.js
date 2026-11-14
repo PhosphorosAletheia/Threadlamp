@@ -51,6 +51,10 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     await waitFor('document.querySelectorAll(".agent-select").length === 2');
     assert.equal(await evaluate('typeof chrome.runtime'),"undefined","LAN UI needs no extension API");
     assert.equal(await evaluate('!!document.querySelector(".preferences-body .lan-install")'),true);
+    assert.equal(await evaluate('!!document.querySelector(".preferences-body #lan-sign-out")'),true);
+    assert.equal(await evaluate('!!document.querySelector(".top-actions #lan-sign-out")'),false);
+    assert.equal(await evaluate('document.getElementById("lan-camera-layout").value'),"safe");
+    await evaluate('document.getElementById("lan-camera-layout").value="right";document.getElementById("lan-camera-layout").dispatchEvent(new Event("change"))');
     await evaluate('window.dispatchEvent(new Event("appinstalled"))');
     assert.equal(await evaluate('document.querySelector(".lan-install button").hidden'),true);
 
@@ -71,6 +75,8 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     await waitFor('!window.reloadSentinel && document.querySelectorAll(".agent-select").length === 2');
     assert.equal(actions.length,1,"reload never replays a queued command");
     assert.equal(await evaluate('performance.getEntriesByType("navigation")[0].type'),"reload");
+    assert.equal(await evaluate('document.getElementById("lan-camera-layout").value'),"right","camera choice survives reload");
+    await evaluate('document.getElementById("lan-camera-layout").value="safe";document.getElementById("lan-camera-layout").dispatchEvent(new Event("change"))');
     await command("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
     assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'),"reload control fits Android dashboard width");
     assert.ok(await evaluate('document.getElementById("refresh").getBoundingClientRect().right <= innerWidth'),"reload remains visible");
@@ -87,6 +93,38 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
       assert.equal(geometry.padding,"0px");
       assert.ok(Math.abs(geometry.bottom-geometry.viewport)<1,"footer fills the changing viewport");
     }
+    // Generic corner camera: 43 CSS px high and 58 px wide, with a visible badge.
+    for (const side of ["right", "left"]) {
+      await evaluate(`document.getElementById("lan-camera-layout").value=${JSON.stringify(side)};document.getElementById("lan-camera-layout").dispatchEvent(new Event("change"))`);
+      for (const width of [411,390,360]) {
+        await command("Emulation.setSafeAreaInsetsOverride",{insets:{top:43,bottom:0,left:0,right:0}});
+        await command("Emulation.setDeviceMetricsOverride",{width,height:869,deviceScaleFactor:1,mobile:true});
+        await waitFor('Math.abs(document.body.getBoundingClientRect().height-visualViewport.height)<1');
+        const g=await evaluate(`(() => {
+          const badge=document.getElementById("activity-count");badge.hidden=false;badge.textContent="999";
+          const rect=n=>{const r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,height:r.height}};
+          return {header:rect(document.querySelector(".topbar")),controls:[...document.querySelectorAll(".top-actions button")].map(rect),brand:rect(document.querySelector(".brand")),overflow:document.documentElement.scrollWidth>innerWidth};
+        })()`);
+        assert.equal(g.header.height,58,"corner camera no longer adds an empty top row");
+        assert.equal(g.overflow,false);
+        for (const r of [...g.controls,g.brand]) {
+          assert.ok(side==="right" ? r.right<=width-58 : r.left>=58,"header stays beside the corner cutout");
+          assert.ok(r.top>=0 && r.bottom<=58 && r.left>=0 && r.right<=width,"controls remain on screen");
+        }
+        for (let i=1;i<g.controls.length;i++) assert.ok(g.controls[i].left>=g.controls[i-1].right,"header buttons do not overlap");
+        assert.ok(g.controls[0].left>=g.brand.right,"brand and controls do not overlap");
+        if(side==="right" && width===411 && process.env.THREADLAMP_CAMERA_SCREENSHOT) {
+          const shot=await command("Page.captureScreenshot",{format:"png"});fs.writeFileSync(process.env.THREADLAMP_CAMERA_SCREENSHOT,Buffer.from(shot.data,"base64"));
+        }
+      }
+    }
+    await command("Emulation.setDeviceMetricsOverride",{width:320,height:844,deviceScaleFactor:1,mobile:true});
+    assert.equal(await evaluate('document.querySelector(".topbar").getBoundingClientRect().height'),101,"narrow display retains full camera clearance");
+    await command("Emulation.setSafeAreaInsetsOverride",{insets:{top:0,bottom:0,left:43,right:0}});
+    await command("Emulation.setDeviceMetricsOverride",{width:700,height:390,deviceScaleFactor:1,mobile:true});
+    assert.ok(await evaluate('document.querySelector(".brand").getBoundingClientRect().left >= 43'),"landscape retains side clearance");
+    await command("Emulation.setSafeAreaInsetsOverride",{insets:{top:0,bottom:0,left:0,right:0}});
+    await command("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
     await command("Emulation.setPageScaleFactor",{pageScaleFactor:2});
     await waitFor('Math.abs(document.body.getBoundingClientRect().height-innerHeight)<1');
     await command("Emulation.setPageScaleFactor",{pageScaleFactor:1});
@@ -122,7 +160,7 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
       await command("Page.navigate",{url:`file://${local}/index.html`});await waitFor('!!document.getElementById("smoke-result")');
       const results=await evaluate('[...document.querySelectorAll("#smoke-result")].map(n=>n.textContent)');assert.equal(results.length,1);assert.match(results[0],/^PASS:/);
     }
-    assert.deepEqual(errors,[]);console.log("PASS: full-screen dynamic viewport/insets, keyboard-sized viewport, zoom and fullscreen exit; dashboard/login reload, hidden-agent draft cancellation, pending-command warning, no replay; PWA manifest, install prompt and dismissal, installed state, Android-sized login; HTTPS login, real LAN RPC, queue target, mobile layout, session expiry preserves drafts; local dashboard desktop/mobile regression.");
+    assert.deepEqual(errors,[]);console.log("PASS: saved camera layout, compact corner headers with activity badge, narrow/landscape fallback, Sign out in Settings; full-screen dynamic viewport/insets, keyboard-sized viewport, zoom and fullscreen exit; dashboard/login reload, hidden-agent draft cancellation, pending-command warning, no replay; PWA manifest, install prompt and dismissal, installed state, Android-sized login; HTTPS login, real LAN RPC, queue target, mobile layout, session expiry preserves drafts; local dashboard desktop/mobile regression.");
   } finally {
     cdp?.close();bridge?.terminate();if(chrome && chrome.exitCode === null && chrome.signalCode === null){const closed=once(chrome,"exit");chrome.kill("SIGTERM");await closed;}
     if(helper)await helper.close();fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:200});

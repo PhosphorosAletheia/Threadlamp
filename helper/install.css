@@ -39,4 +39,25 @@ html.lan-installed .app-status {
   html.lan-installed .fleet-bar { padding-left: calc(9px + var(--lan-safe-left)); padding-right: calc(9px + var(--lan-safe-right)); }
 }
 
+/* Opt in by camera position: CSS safe-area insets do not identify its side.
+   Narrow screens and landscape keep the full safe-area layout. */
+@media (min-width: 360px) and (max-width: 720px) and (orientation: portrait) {
+  html.lan-installed:is([data-lan-camera="right"], [data-lan-camera="left"]) body[data-mobile-view] {
+    grid-template-rows: max(58px, var(--lan-safe-top)) 44px minmax(0, 1fr) auto;
+  }
+  html.lan-installed:is([data-lan-camera="right"], [data-lan-camera="left"]) .topbar {
+    padding-top: 0;
+    gap: 6px;
+  }
+  html.lan-installed[data-lan-camera="right"] .topbar {
+    padding-right: max(14px, var(--lan-safe-right), calc(var(--lan-safe-top) * 1.75));
+  }
+  html.lan-installed[data-lan-camera="left"] .topbar {
+    padding-left: max(14px, var(--lan-safe-left), calc(var(--lan-safe-top) * 1.75));
+  }
+  html.lan-installed:is([data-lan-camera="right"], [data-lan-camera="left"]) .product-lockup {
+    display: none;
+  }
+}
+
 #lan-reload { margin-top: 18px; }

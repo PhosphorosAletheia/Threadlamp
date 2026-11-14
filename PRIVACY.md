@@ -1,7 +1,7 @@
 # Threadlamp privacy notice
 
 Publisher: [Phosphoros Research](https://phosphoros-research.pages.dev/).
-Applies to Threadlamp 1.14.2 beta 1. Updated November 13, 2026.
+Applies to Threadlamp 1.14.3 beta 1. Updated November 13, 2026.
 
 ## Data handled
 
