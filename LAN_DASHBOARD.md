@@ -82,7 +82,12 @@ camera instead of leaving a full-width strip above it. The choice is saved only
 on this device and applies in portrait mode on screens 360–720 CSS pixels wide.
 For a centered or wide notch, keep **Below camera (default)**; use that setting
 also if any control is obscured. Landscape and narrower screens keep the full
-safe-area layout.
+safe-area layout. A camera cutout can keep a permanent top inset even when the
+notification bar is hidden; the compact option avoids reserving that whole row.
+
+After updating, tap **Reload**, then open **Settings → Installed app header**
+to choose your camera layout. Changes apply immediately and remain selected
+when you reopen the app. **Sign out** is also in Settings.
 
 The app stays on your LAN and uses the same sign-in and session expiry as the
 browser dashboard. Chrome, the extension, and the helper still run on the host.
