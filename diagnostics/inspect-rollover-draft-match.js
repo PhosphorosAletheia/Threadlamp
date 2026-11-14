@@ -156,6 +156,14 @@
         const clone = root.cloneNode(true);
         verifiedResourceRows(clone).forEach((row) => row.remove());
         clone.querySelectorAll(MESSAGE_UI_SELECTOR).forEach((node) => node.remove());
+        if (element.matches?.("[data-message-author-role='user'], [data-user-message-bubble='true'], [data-turn='user'], [data-role='user'], [data-testid='user-turn']")) {
+          // textContent joins paragraphs and drops BRs in newer user bubbles.
+          // Restore structural breaks on the detached clone, without changing
+          // inline word boundaries or relaxing submitted-message comparisons.
+          clone.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+          clone.querySelectorAll("p, div, li, blockquote, pre, h1, h2, h3, h4, h5, h6")
+            .forEach((node) => { node.prepend("\n"); node.append("\n"); });
+        }
         return (clone.textContent || "").trim();
       })
       .filter(Boolean)

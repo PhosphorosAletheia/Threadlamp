@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14.4 beta 1
+
+- Preserve paragraphs and line breaks when reading submitted user messages in
+  newer ChatGPT layouts, so a verified new-chat handoff is not rejected as changed
+  text when its saved URL appears. Project and message-ID checks remain required.
+
 ## 1.14.3 beta 1
 
 - Add a saved compact header option beside a left or right corner camera in the

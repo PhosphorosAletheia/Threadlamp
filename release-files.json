@@ -72,6 +72,7 @@
     "tests/dashboard-ui.fixture.js",
     "tests/dashboard.test.js",
     "tests/delivery-timeout.test.js",
+    "tests/handoff-reader.browser.js",
     "tests/heartbeat-ownership.test.js",
     "tests/heartbeat.test.js",
     "tests/idle-banner.test.js",

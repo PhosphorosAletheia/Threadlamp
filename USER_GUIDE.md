@@ -144,7 +144,14 @@ the continuation is observed there. Ordinary navigation does not authorize a sen
 
 If ChatGPT assigns the new conversation URL late, Logic Mode checks the delivered
 message ID and text before adopting it. A delayed URL alone does not stop the run;
-missing or mismatched message identity still requires inspection.
+missing or mismatched message identity still requires inspection. Paragraph and
+line-break formatting is preserved when comparing the delivered continuation.
+
+If an older version stopped after the continuation already ran, save any queued
+or unsent text before updating the extension. Reload the affected saved chat,
+then use **Resume** in the extension popup to monitor its existing response
+without sending the startup instructions again. Inspect the destination project
+and response first; do not retry a handoff that was already delivered.
 
 A successful handoff means the continuation message was observed in the new chat;
 it does not verify that the model recovered all prior context. Review the first
