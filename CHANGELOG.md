@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.16.1 beta 1
+
+- Remove obsolete OpenRouter error messages from agent summaries while retaining saved summaries and genuine Logic SUMMARY notices.
+- Show the shared OpenRouter rate-limit cooldown beside every Rewrite control. Messages now describe draft rewriting and when to click Rewrite again; completed chat outputs do not retry OpenRouter.
+
 ## 1.16.0 beta 1
 
 - Read dashboard summaries from a 600-character `LOGIC:SUMMARY` line before the final control flag; completed responses no longer trigger OpenRouter requests.

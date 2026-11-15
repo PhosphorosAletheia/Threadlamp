@@ -153,3 +153,37 @@ test("a delayed authorization cannot replace a newer local summary",async()=>{
   release();await old;
   assert.equal(h.summary().last.text,"Newer result.");
 });
+
+
+test("upgrade removes retired provider errors, preserves summaries and keeps cooldown beside rewriting", async () => {
+  let now = Date.now(); class Clock extends Date {static now(){return now;}}
+  const localError = "No valid SUMMARY tag in the latest response. Start Logic Mode with the updated instructions (600 characters maximum).";
+  const last = {text:"Saved useful summary",model:"example/free",completedAt:now};
+  const records = {
+    [sourceUrl]:{status:"error",error:"OpenRouter free-model rate limit reached. The next completed output will try again.",last},
+    network:{status:"error",error:"Summary unavailable: network failure or request timeout",last:null},
+    pending:{status:"pending",last},
+    local:{status:"error",error:localError,last},
+    current:{source:"chat",status:"error",error:"A local summary notice",last},
+  };
+  const h = await setup(undefined, {...saved,[RECORDS]:records,logicSummaryCooldown:{until:now+120000,strikes:1}}, c=>{c.Date=Clock;});
+  const migrated = h.local.values[RECORDS];
+  assert.equal(migrated[sourceUrl].status,"ready");
+  assert.equal(migrated[sourceUrl].last.text,last.text);
+  assert.equal(migrated[sourceUrl].error,"");
+  assert.equal(migrated.network.status,"waiting");
+  assert.equal(migrated.network.error,"");
+  assert.equal(migrated.pending.status,"ready");
+  assert.equal(migrated.local.error,localError);
+  assert.equal(migrated.local.source,"chat");
+  assert.equal(migrated.current.error,"A local summary notice");
+  const listing = await h.context.DashboardWorker.remote({type:"DB_LIST"});
+  assert.equal(listing.rewriteStatus.retryAt,now+120000);
+  assert.equal(JSON.stringify(listing).includes("invented-test-key"),false);
+  assert.equal(JSON.stringify(listing).includes("next completed output"),false);
+  now += 120001;
+  assert.equal((await h.context.SummaryWorker.rewriteStatus()).retryAt,0);
+  assert.equal(h.calls.length,0,"Reading status never calls OpenRouter");
+  const restarted = await setup(undefined,h.local.values);
+  assert.equal(restarted.summary().last.text,last.text,"Migration is safe to repeat");
+});

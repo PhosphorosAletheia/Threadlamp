@@ -162,9 +162,8 @@
     const summary = agent.summary, last = summary?.last;
     $("agent-summary").textContent = last?.text || "No summary yet. Start Logic Mode with the updated SUMMARY instructions.";
     $("agent-summary-meta").textContent = last ? `Completed ${time(last.completedAt)} · ${last.model}${last.flag ? ` · ${last.flag.toUpperCase()}` : ""}` : "";
-    $("agent-summary-status").textContent = summary?.status === "pending"
-      ? "Summarizing latest output…" + (last ? " Previous summary shown above." : "")
-      : summary?.status === "error" ? summary.error + (last ? " Previous summary shown above." : "") : "";
+    $("agent-summary-status").textContent = summary?.source === "chat" && summary.status === "error"
+      ? summary.error + (last ? " Previous summary shown above." : "") : "";
     $("agent-timing").textContent = agent.waitUntil ? `Status check at ${time(agent.waitUntil)} · ${Math.max(0, Math.ceil((agent.waitUntil - Date.now()) / 1000))}s remaining`
       : agent.heartbeat?.nextRunAt ? `Next heartbeat: ${time(agent.heartbeat.nextRunAt)}` : agent.lastSeen ? `Updated ${new Date(agent.lastSeen).toLocaleTimeString()}` : "";
     $("agent-guard").textContent = !agent.online ? "Controls are disabled until this page connects."
@@ -284,6 +283,12 @@
     try {
       const result = await request("DB_LIST");
       agents = result.agents; events = result.events;
+      const retryAt = result.rewriteStatus?.retryAt;
+      for (const node of document.querySelectorAll(".rewrite-availability")) {
+        node.textContent = retryAt > Date.now()
+          ? `Rewrite unavailable: OpenRouter free-model rate limit reached. Click Rewrite for agent after ${time(retryAt)}. Drafts are unchanged.` : "";
+        node.hidden = !node.textContent;
+      }
       $("connection").textContent = "● Live";
       $("version").textContent = `v${result.version} · This profile`;
       $("updated").textContent = new Date().toLocaleTimeString();
@@ -397,7 +402,9 @@
     button.type = revert.type = "button"; revert.hidden = true;
     button.dataset.rewriteFor = field.id;
     button.title = "Send only this draft to OpenRouter. Review the result before sending.";
-    row.append(button, revert, status);
+    const availability = el("span", "", "rewrite-availability small muted");
+    availability.setAttribute("role", "status"); availability.hidden = true;
+    row.append(button, revert, status, availability);
     if (field.id === "queued") field.parentElement.querySelector(".editor-footer").after(row);
     else field.after(row);
     field.addEventListener("input", () => {revision += 1; undo = null; revert.hidden = true; status.textContent = "";});

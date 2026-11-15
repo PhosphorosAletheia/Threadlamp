@@ -16,6 +16,7 @@ function mock() {
   const actions = [];
   let uncertainBroadcast = false, onQueueRequest = null, rewriteResolver = null;
   const rewrites = [];
+  const rewriteStatus = {retryAt:Date.now()+120000};
   const caps = { start_loop: false, start_logic: false, resume_logic: false, stop: true, pause: true, resume: false,
     next_cycle: false, queue: true, queue_append: true, remove_queue: true, cancel_queue: false, continue: false, status: false, reply: false, approve: false };
   const base = { online: true, revision: "1", mode: "logic", logicPhase: "monitoring", running: true, count: 2, limit: 10,
@@ -38,7 +39,7 @@ function mock() {
       if (request.type === "SUM_REWRITE") {rewrites.push(request); return new Promise(resolve => {rewriteResolver = resolve;});}
       if (request.type === "DG_GET" || request.type === "DG_SET" || request.type === "DG_CLEAR") return {ok:true,enabled:true,eventCount:12,incidentCount:1};
       if (request.type === "DG_EXPORT") return {ok:true,report:{schema:1,events:[],incidents:[]}};
-      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.12.1" });
+      if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, rewriteStatus, version: "1.16.1" });
       if (request.type === "DB_INSPECT") return { ok: true, schedule: inspectedSchedule, connection: null, defaultPrompt: "Do the scheduled work." };
       if (request.type === "ALERT_GET_SETTINGS") return { soundEnabled: true };
       if (request.type === "HA_GET_SETTINGS") return { enabled: true, connection: { phase: "connected" }, approvalMessage: "Approved. Continue with the current task." };
@@ -102,6 +103,17 @@ function mock() {
       assert(document.querySelector(".agent-select").dataset.agentKey.startsWith("18:"), "Input requests sort first");
       assert(actions.length === 0, "Opening the dashboard never runs commands");
       assert(!$("activity-drawer").open, "Activity stays out of the workspace until requested");
+      await select(18);
+      assert(!$("agent-summary-status").textContent.includes("OpenRouter"), "Retired provider error does not appear under the summary");
+      assert($("agent-summary").textContent.includes("Built the dashboard"), "Saved summary survives retired provider error");
+      assert(document.querySelectorAll(".rewrite-availability").length === 5, "Every editor has provider status beside Rewrite");
+      assert([...document.querySelectorAll(".rewrite-availability")].every(n => !n.hidden && n.textContent.includes("Click Rewrite for agent after")), "Shared cooldown describes an explicit rewrite retry");
+      agents[1].summary = {source:"chat",status:"error",error:"No valid SUMMARY tag in the latest response."};
+      click("#refresh"); await wait();
+      assert($("agent-summary-status").textContent.includes("No valid SUMMARY tag"), "Genuine local summary notices remain visible");
+      rewriteStatus.retryAt = 0; click("#refresh"); await wait();
+      assert([...document.querySelectorAll(".rewrite-availability")].every(n => n.hidden && !n.textContent), "Expired cooldown disappears from all editors");
+      assert(rewrites.length === 0, "Status refresh does not rewrite any draft");
       await select(17);
       assert($("agent-summary").textContent.includes("Reviewed three competitors"), "Selected agent displays its last output summary");
       assert($("agent-summary-meta").textContent.includes("CONTINUE"), "Summary includes ending Logic tag");
