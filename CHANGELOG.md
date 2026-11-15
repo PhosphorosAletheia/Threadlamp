@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.14.5 beta 1
+
+- Clear restored destination drafts during a verified automatic new-chat handoff,
+  including stale handoffs with queued instructions from another agent. Build the
+  replacement from the source chat and its own queue, then verify High thinking
+  and the complete prompt before sending.
+
 ## 1.14.4 beta 1
 
 - Preserve paragraphs and line breaks when reading submitted user messages in

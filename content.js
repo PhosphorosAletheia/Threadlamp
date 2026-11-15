@@ -1692,7 +1692,11 @@ ${LOGIC_START_PROMPT}
     const additionalPrompts = normalizeQueuedPrompts(pending);
 
     if (
-      !destinationMatchesProject(pending?.projectSegment)
+      !pending?.requestId
+      || !pending?.sourceUrl
+      || !sameRolloverProject(projectSegmentFromLocation(pending.sourceUrl), pending.projectSegment)
+      || window.location.pathname === new URL(pending.sourceUrl).pathname
+      || !destinationMatchesProject(pending?.projectSegment)
       || rolloverDestinationHasMessages()
       || (pending?.projectHomeUrl && !projectHomeReady())
       || !previousTitle
@@ -1710,35 +1714,18 @@ ${LOGIC_START_PROMPT}
 
     const composer = findComposer();
     const carriedDraft = composerText(composer);
-    let draftAction = classifyRolloverDraft(carriedDraft, message);
-    if (draftAction === "preserve_manual" && isGeneratedRolloverDraft(carriedDraft)) {
-      draftAction = "replace_carryover";
-    }
-    if (draftAction === "preserve_manual"
-      && await matchesSubmittedRolloverDraft(carriedDraft, pending?.sourceUserFingerprint)) {
-      draftAction = "replace_carryover";
-    }
-    if (state.runId !== entryRunId) return false;
-    if (window.location.href !== destinationUrl || !destinationMatchesProject(pending?.projectSegment)
-      || findComposer() !== composer || composerText(composer) !== carriedDraft) {
-      throw new Error("The new chat or its draft changed while verifying the carried-over message. The draft was preserved.");
-    }
-    if (draftAction === "preserve_manual") {
-      throw new Error(
-        "The new project chat contains a different draft. It was preserved and Logic Mode stopped."
-      );
-    }
-    if (pending.requestId) {
-      const check = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_CHECK", requestId: pending.requestId });
-      if (!check?.ok) throw new Error(check?.error || "The handoff expired or was cancelled. The draft was preserved.");
-    }
+    // This claimed automatic handoff owns the empty destination's composer.
+    // Restored text (including another project's queued instructions) is not
+    // input to the new run. Rebuild solely from the verified source record.
+    const check = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_CHECK", requestId: pending.requestId });
+    if (!check?.ok) throw new Error(check?.error || "The handoff expired or was cancelled. The draft was preserved.");
     if (state.runId !== entryRunId) return false;
     if (window.location.href !== destinationUrl || !destinationMatchesProject(pending?.projectSegment)
       || rolloverDestinationHasMessages() || isGenerating()
       || findComposer() !== composer || composerText(composer) !== carriedDraft) {
       throw new Error("The new chat or its draft changed while verifying the handoff. The draft was preserved.");
     }
-    if (draftAction === "replace_carryover") {
+    if (carriedDraft) {
       if (!clearComposer(composer)) {
         throw new Error("The carried-over continuation draft could not be cleared safely.");
       }

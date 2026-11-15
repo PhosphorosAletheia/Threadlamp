@@ -18,7 +18,8 @@ function fixture() {
   class Clock extends Date { static now() { return now; } }
   const h = contentHarness({ Date: Clock, setTimeout(fn, ms) { return setImmediate(() => { now += ms; tick(); fn(); }); } });
   h.window.location = new URL(sourceUrl); h.document.title = "Funding screening update";
-  const composer = visibleElement();
+  const composer = Object.assign(visibleElement(), {focus() {}, dispatchEvent() {}});
+  Object.defineProperty(composer, "innerText", {get() {return this.textContent;}, set(value) {this.textContent = value;}});
   h.setSelector("#prompt-textarea", [composer]);
   const alert = visibleElement(notice); h.setAlerts([alert]);
   let user = visibleElement("Private submitted user prompt"), assistant = visibleElement("Private previous response");
@@ -40,7 +41,7 @@ function fixture() {
   h.setRequestHandler(async request => {
     calls.push(request);
     if (request.type === "LOGIC_ROLLOVER_PREPARE") {
-      pending = { ...request, requestId: "handoff" }; duringPrepare();
+      pending = { ...request, sourceUrl, requestId: "handoff" }; duringPrepare();
       return { ok: true, requestId: "handoff" };
     }
     if (request.type === "LOGIC_ROLLOVER_CLAIM") return { ok: true, pending };
@@ -186,7 +187,7 @@ async function transitions() {
   h = fixture();
   h.afterNavigation(() => { h.composer.innerText = h.composer.textContent = "My destination draft"; });
   await h.api.beginProjectRollover(8);
-  assert.equal(h.runs.length, 0); assert.equal(h.composer.textContent, "My destination draft");
+  assert.equal(h.runs.length, 1); assert.equal(h.composer.textContent, "", "the claimed destination composer is cleared");
   for (const blocked of ["staleTurns", "savedChat", "missingComposer"]) {
     h = fixture(); h.afterNavigation(() => {
       if (blocked === "staleTurns") h.setTurns(visibleElement("Old turn still mounted"), null);

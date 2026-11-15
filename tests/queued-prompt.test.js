@@ -275,12 +275,13 @@ async function decoratedQueueTests() {
   rollover.window.location = new URL(`https://chatgpt.com/g/${project}`);
   rollover.setSelector("#prompt-textarea", [visibleElement()]);
   const runs = rollover.api.captureHeartbeatRunsForTest();
-  await rollover.api.startClaimedLogicRollover({ previousTitle: "Old chat", projectSegment: project,
+  rollover.setRequestHandler(async () => ({ok:true}));
+  await rollover.api.startClaimedLogicRollover({ requestId: "receipt", sourceUrl: `https://chatgpt.com/g/${project}/c/source`, previousTitle: "Old chat", projectSegment: project,
     message: "Continue", limit: 5, count: 1, queuedPrompt: "Carried once" });
   assert.equal(runs.length, 1);
   assert.equal(rollover.api.getQueuedPromptForTest().text, "Carried once");
   assert.equal(rollover.api.getQueuedPromptForTest().url, rollover.window.location.href);
-  await rollover.api.startClaimedLogicRollover({ previousTitle: "Old chat", projectSegment: project,
+  await rollover.api.startClaimedLogicRollover({ requestId: "receipt", sourceUrl: `https://chatgpt.com/g/${project}/c/source`, previousTitle: "Old chat", projectSegment: project,
     message: "Continue", limit: 5, count: 1, queuedPrompts: [{id:"first",text:"First"},{id:"second",text:"Second"}] });
   assert.deepEqual(Array.from(rollover.api.getQueuedPromptsForTest(), item => [item.id,item.text,item.url]),
     [["first","First",rollover.window.location.href],["second","Second",rollover.window.location.href]]);

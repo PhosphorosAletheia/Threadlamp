@@ -693,7 +693,7 @@ async function testContentRolloverGuards() {
 }
 
 async function testRolloverFailureStopsAndPreservesReason() {
-  for (const failure of ["claim", "draft"]) {
+  for (const failure of ["claim", "receipt"]) {
     const harness = contentHarness();
     const { api, document, window } = harness;
     const project = "g-p-0123456789abcdef0123456789abcdef-job-search";
@@ -722,7 +722,8 @@ async function testRolloverFailureStopsAndPreservesReason() {
       if (request.type === "LOGIC_ROLLOVER_PREPARE") return { ok: true, requestId: "handoff" };
       if (request.type === "LOGIC_ROLLOVER_CLAIM") return failure === "claim"
         ? { ok: false, error: "Claim failed for regression test." }
-        : { ok: true, pending: { requestId: "handoff", projectSegment: project, previousTitle: "Evidence Validation Update", message: "Continue", count: 0, limit: 1000 } };
+        : { ok: true, pending: { requestId: "handoff", sourceUrl: `https://chatgpt.com/g/${project}/c/old`, projectSegment: project, previousTitle: "Evidence Validation Update", message: "Continue", count: 0, limit: 1000 } };
+      if (request.type === "LOGIC_ROLLOVER_CHECK") return {ok:false, error:"Receipt cancelled for regression test."};
       return { ok: true };
     });
     Object.assign(api.state, { running: true, mode: "logic", logicPhase: "rolling_over", rolloverEnabled: true, message: "Continue", count: 0, limit: 1000, runId: 42 });
@@ -730,7 +731,7 @@ async function testRolloverFailureStopsAndPreservesReason() {
     assert.equal(api.state.running, false, `${failure}: rollover must stop after failure`);
     assert.equal(api.state.logicPhase, "idle");
     assert.equal(api.state.error, true);
-    assert.match(api.state.detail, failure === "claim" ? /Claim failed for regression test/ : /different draft/);
+    assert.match(api.state.detail, failure === "claim" ? /Claim failed for regression test/ : /Receipt cancelled for regression test/);
     assert.equal(composer.textContent, "different manual draft", "manual draft must remain intact");
     assert.ok(requests.some(request => request.type === "LOGIC_ROLLOVER_CANCEL" && request.requestId === "handoff"));
     const notification = requests.find(request => request.type === "HA_NOTIFY_ROLLOVER_FAILURE");

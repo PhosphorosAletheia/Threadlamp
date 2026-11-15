@@ -7,8 +7,9 @@ of messages**, then select **Start loop**. The extension waits for a finished
 response before attempting the next message. Use a limit of 1 for your first test.
 The Continue and Status buttons send those prompts once.
 
-Typing a manual draft prevents an automatic send. Inspect the conversation if
-the UI reports uncertain delivery; do not assume a message was delivered or retry
+Typing a manual draft prevents an ordinary automatic send. A verified automatic
+new-chat handoff clears the destination message box as described below. Inspect
+the conversation if the UI reports uncertain delivery; do not assume a message was delivered or retry
 without checking. ChatGPT page changes can break completion detection or controls.
 
 ## Logic Mode
@@ -129,11 +130,15 @@ stops with a notice instead of guessing. Existing conversations are never used
 as automatic handoff destinations. The continuation includes the source project
 ID and chat link; the agent must request missing context if it cannot access it.
 
-If the landing page restores a complete Threadlamp handoff draft, Threadlamp
-clears it and writes a fresh continuation for the verified source conversation.
-Edited handoff text and unrelated drafts are preserved. The receipt, destination,
-and editor are checked again before clearing and sending. If the destination
-does not become ready, the stopped notice identifies the check that failed.
+An automatic handoff controls the new destination message box. After verifying
+the handoff record and destination project, Threadlamp clears any text restored
+there, including another agent's handoff or queued instructions. It builds a fresh
+continuation from the original conversation and that agent's own queue, verifies
+High thinking, and checks the complete prompt again before sending. Do not enter
+text in the new destination while a handoff is underway. A change during
+verification, an expired handoff, or an unverified project still stops the send.
+If the destination does not become ready, the stopped notice identifies the check
+that failed.
 Prior conversation turns retained in hidden page sections do not block a new
 project landing page. A saved conversation containing history still cannot be
 used as a handoff destination, even when that history is hidden.

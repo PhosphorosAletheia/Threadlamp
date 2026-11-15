@@ -5,8 +5,7 @@
  * SPDX-License-Identifier: MPL-2.0 */
 "use strict";
 const assert = require("node:assert/strict");
-const { webcrypto } = require("node:crypto");
-const { contentHarness, visibleElement } = require("./rollover.test.js");
+const { contentHarness, visibleElement, backgroundHarness } = require("./rollover.test.js");
 const project = "g-p-0123456789abcdef0123456789abcdef-video-production";
 const submitted = "Render a 1080p video using as few resources as possible.";
 
@@ -17,7 +16,8 @@ function destination(timing, captureRun = true) {
   Object.defineProperty(composer, "innerText", { get() { return this.textContent; }, set(value) { this.textContent = value; } });
   h.setSelector("#prompt-textarea", [composer]);
   const runs = captureRun ? h.api.captureHeartbeatRunsForTest() : [];
-  const pending = { projectSegment: project, previousTitle: "Video production", message: "Continue", count: 2, limit: 20 };
+  h.setRequestHandler(async () => ({ ok: true }));
+  const pending = { requestId: "receipt", sourceUrl: `https://chatgpt.com/g/${project}/c/original`, projectSegment: project, previousTitle: "Video production", message: "Continue", count: 2, limit: 20 };
   return Object.assign(h, { composer, runs, pending });
 }
 
@@ -49,18 +49,20 @@ function retainedHistory(h) {
     h.composer.textContent = draft;
     h.setRequestHandler(async () => ({ ok: true }));
     await h.api.startClaimedLogicRollover({ ...h.pending, requestId: "receipt", sourceUrl });
-    assert.equal(h.composer.textContent, "", "a complete restored template is cleared after receipt verification");
+    assert.equal(h.composer.textContent, "", "restored text is cleared after receipt verification");
     assert.equal(h.runs.length, 1);
     assert.ok(h.runs[0][2].includes("Source conversation: " + sourceUrl));
     assert.ok(!h.runs[0][2].includes('titled "Different agent"'), "fresh prompt uses this handoff's source");
   }
   for (const draft of [oldHandoff + " Extra instructions", oldHandoff.replace("Continue the unfinished task", "Delete the unfinished task"),
-    oldHandoff.split("Start Logic Mode")[0], "My notes: " + oldHandoff]) {
+    oldHandoff.split("Start Logic Mode")[0], "My notes: " + oldHandoff,
+    helper.buildRolloverPrompt("Other agent", "https://chatgpt.com/g/g-p-abcdef0123456789abcdef0123456789/c/other") + "\n\nAdditional instructions from the user for this round:\nInstructions belonging only to the other agent."]) {
     const h = destination();
     h.composer.textContent = draft;
-    await assert.rejects(h.api.startClaimedLogicRollover({ ...h.pending, sourceUrl }), /different draft/);
-    assert.equal(h.composer.textContent, draft);
-    assert.equal(h.runs.length, 0);
+    await h.api.startClaimedLogicRollover({ ...h.pending, sourceUrl });
+    assert.equal(h.composer.textContent, "");
+    assert.equal(h.runs.length, 1);
+    assert.equal(h.runs[0][2], helper.buildRolloverPrompt(h.pending.previousTitle, sourceUrl));
   }
   for (const change of ["cancel", "draft", "navigation", "user", "stop"]) {
     const h = destination();
@@ -140,6 +142,54 @@ function retainedHistory(h) {
     assert.equal(h.composer.textContent, oldHandoff, "history becoming active during verification preserves the draft");
     assert.equal(h.runs.length, 0);
   }
+  // Three simultaneous handoffs can see the same restored draft. Each must
+  // claim its own receipt and send only its source prompt and first queue item.
+  {
+    const worker = await backgroundHarness();
+    const stale = helper.buildRolloverPrompt("Other agent", sourceUrl)
+      + "\n\nAdditional instructions from the user for this round:\nOther agent instructions";
+    const entries = await Promise.all(["1", "2", "3"].map(async (digit, index) => {
+      const h = destination(undefined, false);
+      const ownProject = "g-p-" + digit.repeat(32);
+      const source = `https://chatgpt.com/g/${ownProject}/c/source-${index}`;
+      const sender = {id:"extension-test-id", tab:{id:100 + index, url:source}};
+      const payload = {...h.pending, projectSegment:ownProject, previousTitle:`Agent ${index}`,
+        queuedPrompts:[{id:`first-${index}`,text:`Own instruction ${index}`}, {id:`second-${index}`,text:`Later instruction ${index}`}]};
+      const receipt = await worker.api.prepareLogicRollover(payload, sender);
+      h.window.location = new URL(`https://chatgpt.com/g/${ownProject}/project`);
+      const destinationSender = {...sender, tab:{...sender.tab, url:h.window.location.href}};
+      const claimed = await worker.api.claimLogicRollover(receipt, destinationSender);
+      assert.equal(claimed.pending.sourceUrl, source);
+      h.composer.textContent = stale;
+      const form = visibleElement();
+      form.querySelectorAll = () => [visibleElement("High", {"aria-label":"Select ChatGPT model", "aria-haspopup":"menu", "aria-expanded":"false"})];
+      h.composer.closest = selector => selector === "form" ? form : null;
+      const sent = [];
+      h.api.prepareThinkingSendForTest(h.composer);
+      h.api.observeStartupForTest(async () => ({element:visibleElement(sent[0]), text:sent[0]}));
+      const send = visibleElement("Send");
+      send.click = () => { sent.push(h.composer.textContent); h.composer.textContent = ""; };
+      h.setSelector("button[data-testid='send-button']", [send]);
+      h.setRequestHandler(request => request.type.startsWith("LOGIC_ROLLOVER_")
+        ? worker.api.completeLogicRollover(request, destinationSender) : Promise.resolve({ok:true}));
+      return {h, pending:claimed.pending, sent, runs:h.api.trackLogicRunsForTest(), index, source};
+    }));
+    await Promise.all(entries.map(({h, pending}) => h.api.startClaimedLogicRollover(pending)));
+    await Promise.all(entries.flatMap(entry => entry.runs));
+    for (const {h, sent, index, source} of entries) {
+      assert.deepEqual(sent, [helper.buildRolloverPrompt(`Agent ${index}`, source)
+        + `\n\nAdditional instructions from the user for this round:\nOwn instruction ${index}`]);
+      assert.deepEqual(Array.from(h.api.getQueuedPromptsForTest(), item => item.text), [`Later instruction ${index}`]);
+      assert.equal(h.api.state.error, false);
+    }
+  }
+  for (const invalid of [{requestId:null}, {sourceUrl:null}, {sourceUrl:`https://chatgpt.com/g/${project}`},
+    {projectSegment:"g-p-" + "f".repeat(32)}, {sourceUrl:"https://chatgpt.com/g/g-p-" + "e".repeat(32) + "/c/source"}]) {
+    const h = destination();
+    await assert.rejects(h.api.startClaimedLogicRollover({...h.pending, ...invalid}), /could not be verified/);
+    assert.equal(h.composer.textContent, submitted, "unverified destinations must not be cleared");
+    assert.equal(h.runs.length, 0);
+  }
   const fingerprint = await helper.rolloverDraftFingerprint(submitted);
   assert.equal(fingerprint.length, submitted.length);
   assert.match(fingerprint.sha256, /^[a-f0-9]{64}$/);
@@ -175,7 +225,7 @@ function retainedHistory(h) {
   await actual.api.startClaimedLogicRollover({ ...actual.pending, sourceUserFingerprint: fingerprint });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sent.length, 1);
-  assert.equal(sent[0], actual.api.buildRolloverPrompt("Video production"));
+  assert.equal(sent[0], actual.api.buildRolloverPrompt("Video production", sourceUrl));
   assert.match(sent[0], /continuation of the project chat titled "Video production"/);
   assert.match(sent[0], /Start Logic Mode for this conversation/);
   assert.equal(sent[0].includes(submitted), false);
@@ -231,6 +281,8 @@ function retainedHistory(h) {
     if (scenario === "ordinary") {
       Object.assign(h.api.state, {running:true, mode:"logic", logicPhase:"monitoring", runId:1});
       await assert.rejects(h.api.submitMessage(1, "Continue", "Sending"), /left the scheduled conversation/);
+    } else if (["no-receipt", "wrong-project"].includes(scenario)) {
+      await assert.rejects(h.api.startClaimedLogicRollover(pending), /could not be verified/);
     } else {
       await h.api.startClaimedLogicRollover(pending);
       await Promise.all(runs);
@@ -247,14 +299,16 @@ function retainedHistory(h) {
   for (const draft of [submitted.toUpperCase(), `${submitted} More instructions.`, submitted.replace("1080p", "720p"), `${submitted}\u200B`, submitted.replace(" a ", "\ta "), submitted.replace(" a ", "\u00a0a "), submitted.replace(".", "!")]) {
     const h = destination();
     h.composer.textContent = draft;
-    await assert.rejects(h.api.startClaimedLogicRollover({ ...h.pending, sourceUserFingerprint: fingerprint }), /different draft/);
-    assert.equal(h.composer.textContent, draft);
-    assert.equal(h.runs.length, 0);
+    assert.equal(await helper.matchesSubmittedRolloverDraft(draft, fingerprint), false, "source fingerprint checks remain strict");
+    await h.api.startClaimedLogicRollover({ ...h.pending, sourceUserFingerprint: fingerprint });
+    assert.equal(h.composer.textContent, "");
+    assert.equal(h.runs.length, 1);
   }
   for (const saved of [null, { length: submitted.length, sha256: "invalid" }, await helper.rolloverDraftFingerprint("Another chat's prompt")]) {
     const h = destination();
-    await assert.rejects(h.api.startClaimedLogicRollover({ ...h.pending, sourceUserFingerprint: saved }), /different draft/);
-    assert.equal(h.composer.textContent, submitted);
+    assert.equal(await helper.matchesSubmittedRolloverDraft(submitted, saved), false);
+    await h.api.startClaimedLogicRollover({ ...h.pending, sourceUserFingerprint: saved });
+    assert.equal(h.composer.textContent, "", "destination clearing is authorized by the receipt, not a text fingerprint");
   }
 
   // Legacy handoffs retain exact matching; absent rendering evidence is not guessed.
@@ -270,14 +324,14 @@ function retainedHistory(h) {
   assert.equal(await helper.matchesSubmittedRolloverDraft(submitted, spacedSource), true);
 
   for (const change of ["draft", "whitespace-draft", "navigation", "stop"]) {
-    let mutate;
-    const h = destination({ crypto: { subtle: { async digest(...args) { mutate(); return webcrypto.subtle.digest(...args); } } } });
-    mutate = () => {
+    const h = destination();
+    h.setRequestHandler(async () => {
       if (change === "draft") h.composer.textContent = "A new manual draft";
       if (change === "whitespace-draft") h.composer.textContent = submitted.replace(" a ", "  a ");
       if (change === "navigation") h.window.location = new URL("https://chatgpt.com/c/another-chat");
       if (change === "stop") h.api.state.runId += 1;
-    };
+      return { ok: true };
+    });
     const operation = h.api.startClaimedLogicRollover({ ...h.pending, sourceUserFingerprint: fingerprint });
     if (change === "stop") assert.equal(await operation, false);
     else await assert.rejects(operation, /draft changed/);
@@ -307,7 +361,7 @@ function retainedHistory(h) {
     };
     h.setRequestHandler(async request => {
       if (request.type === "LOGIC_ROLLOVER_PREPARE") { prepared = request; return { ok: true, requestId: "handoff" }; }
-      if (request.type === "LOGIC_ROLLOVER_CLAIM") return { ok: true, pending: { ...prepared, requestId: "handoff" } };
+      if (request.type === "LOGIC_ROLLOVER_CLAIM") return { ok: true, pending: { ...prepared, sourceUrl: `https://chatgpt.com/g/${project}/c/source`, requestId: "handoff" } };
       return { ok: true };
     });
     Object.assign(h.api.state, { running: true, mode: "logic", logicPhase: "rolling_over", message: "Continue", count: 2, limit: 20, runId: 1 });
