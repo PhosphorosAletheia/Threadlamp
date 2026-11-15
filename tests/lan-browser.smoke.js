@@ -14,7 +14,7 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     helper=createHelper(config,{key:fs.readFileSync(path.join(privateDir,"server-key.pem")),cert:fs.readFileSync(path.join(privateDir,"server-cert.pem"))});await helper.start();
     bridge=new WebSocket(`ws://127.0.0.1:${bridgePort}/threadlamp/bridge`,{origin:`chrome-extension://${"a".repeat(32)}`});await once(bridge,"open");const ready=once(bridge,"message");bridge.send(JSON.stringify({type:"auth",protocol:1,token:config.bridgeToken}));await ready;
     const agent={tabId:17,instanceId:"invented-agent",revision:"1",url:"https://chatgpt.com/c/example",title:"Example Project",chatTitle:"Example chat",online:true,running:false,mode:"idle",logicPhase:"idle",queuedPrompts:[],capabilities:{queue:true,queue_append:true,cancel_queue:true,start_logic:true}};
-    const actions=[]; let diagnosticEnabled=true, diagnosticCleared=false;
+    const actions=[],rewrites=[]; let diagnosticEnabled=true, diagnosticCleared=false;
     bridge.on("message",bytes=>{
       const message=JSON.parse(bytes);if(message.type!=="request")return;
       const r=message.request;let response={ok:true};
@@ -26,6 +26,7 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
       if(r.type==="DB_INSPECT")response={ok:true,schedule:null,connection:null,defaultPrompt:"Check scheduled work."};
       if(r.type==="HA_GET_SETTINGS")response={enabled:false,approvalMessage:"Approved",connection:{phase:"disconnected"}};
       if(r.type==="ALERT_GET_SETTINGS")response={soundEnabled:true};
+      if(r.type==="SUM_REWRITE"){rewrites.push(r);response={ok:true,text:"Please check the logs."};}
       if(r.type==="DB_COMMAND"){actions.push(r);if(["queue","queue_append"].includes(r.action))agent.queuedPrompts.push({id:String(actions.length),text:r.payload.text});}
       bridge.send(JSON.stringify({type:"response",id:message.id,response}));
     });
@@ -84,6 +85,9 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
 
     await evaluate('document.querySelector(".agent-select").click()');
     await waitFor('document.getElementById("agent-title").textContent === "Example Project"');
+    await evaluate('document.getElementById("queued").value="chek teh logs";document.querySelector(\'[data-rewrite-for="queued"]\').click()');
+    await waitFor('document.getElementById("queued").value === "Please check the logs."');
+    assert.equal(rewrites.length,1);assert.equal(rewrites[0].text,"chek teh logs");assert.equal(actions.length,0,"remote rewriting never queues a message");
     await evaluate('document.getElementById("queued").value="Example LAN message";document.querySelector(\'[data-action="queue"]\').click()');
     await waitFor('document.getElementById("queued").value === ""');assert.equal(actions.length,1);assert.equal(actions[0].payload.text,"Example LAN message");assert.equal(actions[0].target.instanceId,"invented-agent");
     assert.equal(await evaluate('document.getElementById("refresh").getAttribute("aria-label")'),"Reload dashboard");

@@ -27,6 +27,7 @@ const test=`(async function(window) {
   const check=(ok,label)=>{if(!ok)throw Error(label)};
   let clock=0; const Date={now:()=>clock}, SEND_ENABLE_TIMEOUT_MS=8000, POLL_MS=250;
   const sleep=async()=>{clock+=9000}, state={running:true,runId:1}, queuedPrompts=[];
+  let queueMoves=0; const queueStore={move:async()=>{queueMoves++}};
   const recordDiagnostic=()=>{};
   let runOwnership=null;
   const wrapper=document.createElement('div');wrapper.setAttribute('data-chatgpt-search-message-ids','01234567-89ab-4cde-8f01-23456789abcd');
@@ -58,6 +59,7 @@ const test=`(async function(window) {
     let accepted=true;try{await assertRunLocation(1)}catch(error){check(/chat changed/.test(error.message),'expected ownership error');accepted=false}
     check(accepted===(scenario==='match'||scenario==='expired-visible'),'saved URL adoption: '+scenario);
   }
+  check(queueMoves===2,'only verified saved destinations move their queue');
   user.innerHTML='<p>un<span>broken</span> inline</p><p>Keep\\tthis\\u00a0space\\u200b.</p><button>Copy</button>';
   check(rolloverRenderedText(messageText(user))==='unbroken inline Keep\\tthis\\u00a0space\\u200b.','inline text, tabs, Unicode and UI stripping');
   user.style.display='none';

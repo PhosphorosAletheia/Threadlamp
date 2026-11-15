@@ -9,13 +9,13 @@
   const status = $("summary-status"), key = $("summary-key"), enabled = $("summary-enabled");
   async function send(message) {
     const result = await chrome.runtime.sendMessage(message);
-    if (!result?.ok) throw new Error(result?.error || "Summary settings could not be saved.");
+    if (!result?.ok) throw new Error(result?.error || "Rewrite settings could not be saved.");
     return result;
   }
   function render(value) {
     enabled.checked = value.enabled; key.value = "";
     $("summary-key-state").textContent = value.keySaved ? "Key saved locally. Leave blank to keep it." : "No API key saved.";
-    status.textContent = value.enabled ? "Summaries enabled for each completed Logic Mode response using openrouter/free." : "Summaries disabled.";
+    status.textContent = value.enabled ? "Rewrite buttons enabled using openrouter/free. Summaries are read locally from Logic tags." : "Rewrite buttons disabled. Local Logic summaries remain enabled.";
   }
   $("summary-controls").addEventListener("submit", async event => {
     event.preventDefault();

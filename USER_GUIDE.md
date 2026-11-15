@@ -67,9 +67,23 @@ be removed once preparation begins. Each chat supports up to 100 messages,
 
 Queueing does not override Pause, approve an input request, or bypass the
 follow-up limit. Remaining entries carry into a verified new-chat handoff.
-Stop discards the queue; refreshing a tab or reloading the extension loses
-in-tab drafts and queues. After a send attempt with uncertain delivery, that
-entry is not replayed automatically; later entries remain queued for review.
+Added messages are saved in this Chrome profile and restored when the same saved
+conversation is reopened, including after a browser restart. Stop preserves them;
+use **Remove** or **Clear queue** to discard them. Text still being typed in an
+editor is not a saved queue entry. Queue restoration does not itself start a run.
+The extension saves removal of the next entry before clicking Send. If interrupted
+at that point, inspect the draft and chat: that entry is not automatically replayed,
+even when delivery is uncertain. Later entries remain queued. A storage or
+competing-tab conflict stops sending; reload the correct chat to review its saved
+queue before resuming. Keep one active automation tab per conversation.
+
+During a verified handoff, the queue moves to the destination atomically. Until a
+new conversation has a saved URL, its queue is bound to that tab. Reopen the saved
+destination to restore remaining entries. If the browser closes before a destination
+URL exists, inspect the interrupted handoff rather than starting it again; its
+stored queue is retained but is not automatically assigned to another unsaved tab.
+Unsent queues are never silently evicted to make space. The profile-wide queue
+store has a two-million-character bound; remove unused queued messages if it fills.
 
 ## Dashboard
 
@@ -164,49 +178,57 @@ response. Threadlamp does not extend the model context or reset an
 account usage allowance. Quota errors must not be treated as permission to bypass
 limits. Check the live chat if a service or quota notice appears.
 
-## Optional last-output summaries
+## Dashboard summaries and draft rewriting
 
-Open **Settings** from the dashboard, find **Last output summaries**, enter your
-OpenRouter API key locally, enable summaries, and save. Allow access to
-`https://openrouter.ai` when Chrome asks. No key belongs in a chat or source file.
+Logic Mode now writes its own summary, up to **600 characters**, immediately
+before the final control marker:
 
-For every completed Logic Mode response, Threadlamp sends only that assistant
-output, from its beginning through its ending Logic tag, to `openrouter/free`.
-CONTINUE, WAIT, USER_INPUT and IDLE all trigger summaries; an invalid WAIT tag can
-also be summarized while Logic Mode waits for correction. Earlier prompts,
-earlier responses, and the rest of the conversation are excluded. An unfinished
-response without a recognized final tag waits for the tag to appear. Resuming
-Logic Mode may summarize the current completed response once; it does not backfill
-conversation history. Loop mode is not included.
+```text
+[[LOGIC:SUMMARY: Reviewed the results; two checks still need attention.]]
+[[LOGIC:CONTINUE]]
+```
 
-The dashboard shows the latest successful summary beside its agent and in the
-agent's detail pane, with completion time, selected model, and ending tag. During
-a newer request or a failure, an earlier summary remains explicitly labeled.
-Summary requests do not delay automatic follow-ups or approve user-input requests.
-No overseer forwarding is included.
+Threadlamp reads that line locally. It never sends completed assistant responses
+to OpenRouter. SUMMARY does not change the control marker or grant permission to
+continue. For an input request, the order is BRIEF, SUMMARY, then USER_INPUT.
+Missing, duplicate or overlong summaries leave the previous valid summary visible
+with an explanation; they do not stop an otherwise valid Logic loop.
 
-The model is fixed to `openrouter/free`, with no paid-model fallback. Free-provider
-availability, rate limits and context windows vary. Requests time out after 25
-seconds; up to four can run concurrently. Outputs over 200,000 characters are
-reported as too large without sending an excerpt. Summaries are limited to 2,000
-characters. Failures are displayed and are not automatically retried. After an
-OpenRouter rate-limit response (HTTP 429), all agents share a cooldown: Threadlamp
-honors Retry-After when supplied, otherwise waits one minute and increases the
-wait after repeated limits, up to one hour. The cooldown survives extension and
-browser restarts. Outputs completed during the cooldown are not sent or queued
-for later replay; the next new completed response after it expires can try again.
-A cooldown cannot overcome a daily provider quota. Clearing saved summaries does
-not bypass the cooldown. A worker/browser restart marks an
-interrupted request as failed, without storing or replaying the original output.
+New **Start Logic Mode** prompts and new-chat handoffs include these instructions.
+Existing chats need the updated instructions once: when safe, use **Start Logic
+Mode**, which sends the new startup prompt. **Resume after reload** only monitors
+the existing conversation and does not send updated instructions. Summaries are
+always local and do not require a key or an enabled rewrite setting. Up to 100
+conversation summary records are retained. **Clear saved summaries** in Settings
+removes them; clearing dashboard activity does not.
 
-The API key and up to 100 conversation summary records remain in local extension
-storage. Each record holds the last successful summary and current request status,
-plus up to 30 completion hashes to prevent repeat requests. Raw outputs are not
-persisted. The key and summary records are excluded from encrypted settings backups.
-Disable summaries to stop future requests, use **Forget API key** to remove the
-key, or **Clear saved summaries** to delete the saved results. Clearing dashboard
-event history does not clear summaries. OpenRouter and the selected provider
-receive the output; their data policies apply.
+Every dashboard message editor has **Rewrite for agent**, including replies,
+queued messages, Message all agents, automatic follow-ups and heartbeat prompts.
+Click it to send only that editor's draft to OpenRouter's `openrouter/free` model
+router. The result replaces the draft without sending or queueing it. Review it,
+or use **Undo rewrite** to restore the original. Editing the draft, changing agents
+or submitting while a request runs prevents the late result from replacing text.
+Failures leave the original draft intact.
+
+In **Settings → Draft rewriting & local summaries**, enter your OpenRouter key
+locally, enable rewriting, save and allow `https://openrouter.ai` access. Existing
+saved keys and the old enabled setting are reused for rewriting. No key belongs
+in a chat or source file. Disabling rewriting or forgetting the key does not
+disable local summaries. Provider data policies apply to drafts you rewrite.
+
+There is no paid fallback. Inputs and returned drafts must fit the editor's
+4,000- or 8,000-character limit; incomplete or oversized replies are rejected
+without silently truncating your instructions. Requests have a 4,096-token output
+budget, a 25-second timeout and a maximum of two concurrent rewrites. Rate limits
+share a persistent cooldown: Retry-After when supplied, otherwise one minute with
+increasing backoff up to one hour. Requests are never automatically retried.
+The key, queues and summaries are excluded from settings backups. Rewrite input
+and output are not saved by Threadlamp's rewrite service or diagnostic logs.
+
+Agent bullets show **green** while running (including scheduled sleep or waiting
+on an external operation), **yellow** when input is needed, **orange** for errors,
+**red** when stopped, and **blue** when paused. Unavailable agents remain gray.
+The accompanying status text distinguishes sleeping from actively working.
 
 ## Optional Home Assistant notifications
 
@@ -260,8 +282,9 @@ version, event times, anonymized project/chat references, tab identifiers, state
 changes, and the checks around automatic sends and handoffs. Error snapshots keep
 recent events from that tab, including draft/message lengths, structural checks,
 High-thinking checks, identity-confirmation results, page reload/discard indicators,
-and extension code locations where an error was reported. OpenRouter request
-lengths, elapsed times, HTTP status, and error categories are included too.
+and extension code locations where an error was reported. Rewrite request
+lengths, elapsed times, cooldown and error categories are included too. No rewrite
+text is logged.
 Message text, queued instructions, replies, titles, full URLs, and credentials are
 not included. References let us correlate events without exposing project or chat
 IDs; they change when diagnostics are cleared.

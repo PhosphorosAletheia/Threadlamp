@@ -6,12 +6,13 @@
   const events = new Set(["loaded", "state", "error", "handoff_prepare", "handoff_claimed", "handoff_verified",
     "draft_cleared", "thinking_verified", "prompt_written", "send_attempt", "send_observed", "handoff_complete",
     "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored", "page_hidden", "overlay_restored",
-    "summary_start", "summary_ready", "summary_error", "summary_skipped"]);
+    "summary_start", "summary_ready", "summary_error", "summary_skipped", "rewrite_ready", "rewrite_error"]);
   const reasons = new Set(["none", "other", "chat_changed", "project_changed", "draft_changed", "high_thinking",
     "context_invalidated", "receipt_rejected", "delivery_timeout", "send_unavailable", "handoff_unverified",
     "notification_failed", "server_error", "conversation_limit", "summary_timeout", "summary_network",
     "summary_cancelled", "summary_response", "summary_rate_limit", "summary_cooldown", "summary_access",
-    "summary_http", "summary_busy", "summary_size", "summary_settings", "summary_internal"]);
+    "summary_http", "summary_busy", "summary_size", "summary_settings", "summary_internal", "queue_storage",
+    "rewrite_timeout", "rewrite_network", "rewrite_cancelled", "rewrite_rate_limit", "rewrite_access", "rewrite_response", "rewrite_busy", "rewrite_other"]);
   const modes = new Set(["idle", "logic", "loop", "setup"]);
   const phases = new Set(["idle", "starting", "monitoring", "waiting_user", "waiting", "sleeping", "rolling_over",
     "stopping", "recovery_paused", "reconnecting", "resuming", "arming_heartbeat", "server_setup", "sending"]);
@@ -30,6 +31,7 @@
   function reason(value) {
     const text = String(value || "").slice(0, 2000);
     for (const [code, pattern] of [
+      ["queue_storage", /queue storage error/i],
       ["context_invalidated", /extension context invalidated/i], ["chat_changed", /chat changed|left the scheduled conversation/i],
       ["project_changed", /project (?:changed|ID)|same project|same-project/i], ["draft_changed", /draft|message box/i],
       ["high_thinking", /high|thinking/i], ["receipt_rejected", /receipt|handoff.*(?:expired|cancelled)/i],

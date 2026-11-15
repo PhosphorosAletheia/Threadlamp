@@ -8,10 +8,10 @@ const assert = require("node:assert/strict");
 const { contentHarness, visibleElement } = require("./rollover.test.js");
 const ERROR = "Message delivery timed out. Please try again.";
 
-function fixture(outcomes = ["idle"]) {
+function fixture(outcomes = ["idle"], options = {}) {
   let now = 0, ticks = 0, tick = () => {};
   class Clock extends Date { static now() { return now; } }
-  const h = contentHarness({ Date: Clock, setTimeout(fn, ms) {
+  const h = contentHarness({ ...options, Date: Clock, setTimeout(fn, ms) {
     return setImmediate(() => {
       assert.ok(++ticks < 500, "a wait did not terminate");
       now += ms; tick(now); fn();

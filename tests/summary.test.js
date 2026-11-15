@@ -10,7 +10,7 @@ const { harness, sourceUrl, popup } = require("./heartbeat.test.js");
 const { fixture } = require("./delivery-timeout.test.js");
 const CONFIG = "logicSummaryConfig", RECORDS = "logicRunSummaries";
 const saved = { [CONFIG]: { enabled: true, apiKey: "invented-test-key" } };
-const completion = (id = "output-1", output = "Implemented the requested change. [[LOGIC:IDLE]]") => ({ type: "SUM_COMPLETE", url: sourceUrl, completion: id, output, flag: "idle" });
+const completion = (id = "output-1", output = "Implemented the requested change.\n[[LOGIC:SUMMARY: Change implemented and checked.]]\n[[LOGIC:IDLE]]") => ({ type: "SUM_COMPLETE", url: sourceUrl, completion: id, output, flag: "idle" });
 const sender = h => ({ id: popup.id, frameId: 0, url: sourceUrl, tab: { ...h.tabs.get(17) } });
 const result = text => ({ ok: true, json: async () => ({ model: "test/free", choices: [{ message: { content: text } }] }) });
 async function setup(fetch = async () => result("Implemented and checked the requested change."), initial = saved, configure = () => {}) {
@@ -23,90 +23,6 @@ async function setup(fetch = async () => result("Implemented and checked the req
   await h.context.SummaryWorker.list();
   return Object.assign(h, { calls, summary: () => h.local.values[RECORDS]?.[sourceUrl] });
 }
-
-test("one completed prompt output is sent with the free router; duplicates and secrets stay bounded", async () => {
-  const h = await setup();
-  assert.equal((await h.dispatch(completion(), sender(h))).ok, true);
-  assert.equal(h.calls.length, 1);
-  const [url, options] = h.calls[0], body = JSON.parse(options.body);
-  assert.equal(url, "https://openrouter.ai/api/v1/chat/completions");
-  assert.equal(body.model, "openrouter/free");
-  assert.equal(body.messages.length, 2);
-  assert.equal(body.messages[1].content, "Completed assistant output:\n" + completion().output);
-  assert.equal(options.redirect, "error");
-  assert.equal(h.summary().last.text, "Implemented and checked the requested change.");
-  assert.equal(h.summary().last.flag, "idle");
-  assert.equal(JSON.stringify(h.local.values[RECORDS]).includes(completion().output), false, "raw output is never persisted");
-  assert.equal((await h.dispatch(completion(), sender(h))).deduplicated, true);
-  assert.equal(h.calls.length, 1);
-  const settings = await h.dispatch({ type: "SUM_GET" });
-  assert.equal(settings.keySaved, true);
-  assert.equal(JSON.stringify(settings).includes("invented-test-key"), false);
-  h.setPageHandler(async (id) => ({ instanceId: `page-${id}`, url: h.tabs.get(id).url, revision: "1" }));
-  const list = await h.dispatch({ type: "DB_LIST" });
-  assert.equal(list.agents.find(a => a.tabId === 17).summary.last.text, h.summary().last.text);
-  assert.equal(list.agents.find(a => a.tabId === 99).summary, null, "summaries never cross conversation URLs");
-});
-
-test("disabled, untrusted, wrong-route, and iframe requests cannot call OpenRouter", async () => {
-  const h = await setup();
-  for (const source of [popup, { ...sender(h), frameId: 1 }, { ...sender(h), id: "foreign" }, { ...sender(h), tab: { id: 17, url: "https://chatgpt.com/c/other" } }]) {
-    assert.equal((await h.dispatch(completion(), source)).ok, false);
-  }
-  assert.equal((await h.dispatch({ type: "SUM_GET" }, sender(h))).ok, false);
-  assert.equal((await h.dispatch({ type: "SUM_SAVE", enabled: true, apiKey: "bad" }, sender(h))).ok, false);
-  await h.dispatch({ type: "SUM_SAVE", enabled: false });
-  assert.equal((await h.dispatch(completion(), sender(h))).skipped, true);
-  assert.equal(h.calls.length, 0);
-  await h.dispatch({ type: "SUM_FORGET" });
-  assert.equal((await h.dispatch({ type: "SUM_GET" })).keySaved, false);
-});
-
-test("rate limits, malformed responses, and excessive output preserve the previous summary and do not retry", async () => {
-  let now = Date.now(); class Clock extends Date { static now() { return now; } }
-  let response = result("Earlier result.");
-  const h = await setup(async () => response, saved, context => {context.Date = Clock;});
-  await h.dispatch(completion(), sender(h));
-  response = { ok: false, status: 429, json: async () => { throw new Error("must not read provider details"); } };
-  await h.dispatch(completion("rate-limited"), sender(h));
-  assert.equal(h.summary().status, "error");
-  assert.match(h.summary().error, /rate limit/);
-  assert.equal(h.summary().last.text, "Earlier result.");
-  await h.dispatch(completion("rate-limited"), sender(h));
-  assert.equal(h.calls.length, 2);
-  now += 60001;
-  response = { ok: true, json: async () => ({ error: { message: "private provider payload" } }) };
-  await h.dispatch(completion("malformed"), sender(h));
-  assert.match(h.summary().error, /no usable summary/);
-  assert.equal(JSON.stringify(h.summary()).includes("private provider payload"), false);
-  await h.dispatch(completion("large", "x".repeat(200001)), sender(h));
-  assert.equal(h.calls.length, 3);
-  assert.match(h.summary().error, /No excerpt was sent/);
-});
-
-test("late results cannot overwrite a newer output; clearing cannot resurrect summaries", async () => {
-  const pending = [];
-  const h = await setup(() => new Promise(resolve => pending.push(resolve)));
-  const first = h.dispatch(completion("first"), sender(h));
-  while (pending.length < 1) await h.flush();
-  const second = h.dispatch(completion("second"), sender(h));
-  while (pending.length < 2) await h.flush();
-  pending[1](result("Newer result.")); await second;
-  pending[0](result("Older result.")); await first;
-  assert.equal(h.summary().last.text, "Newer result.");
-  const third = h.dispatch(completion("third"), sender(h));
-  while (pending.length < 3) await h.flush();
-  await h.dispatch({ type: "SUM_CLEAR" });
-  pending[2](result("Must not reappear.")); await third;
-  assert.equal(h.summary(), undefined);
-});
-
-test("worker restart exposes interrupted status without replaying private output", async () => {
-  const h = await setup(undefined, { ...saved, [RECORDS]: { [sourceUrl]: { runId: "pending", status: "pending", last: null } } });
-  assert.equal(h.summary().status, "error");
-  assert.match(h.summary().error, /interrupted/);
-  assert.equal(h.calls.length, 0);
-});
 
 test("content captures only each finished response regardless of its Logic tag", async () => {
   const f = fixture(); f.hide();
@@ -131,114 +47,109 @@ test("content captures only each finished response regardless of its Logic tag",
   assert.equal(outputs[1].output, "Recovered.\n[[LOGIC:IDLE]]");
 });
 
-test("permission removal and timeouts leave an error without exposing provider details", async () => {
-  const h = await setup((_url, options) => new Promise((_resolve, reject) => {
-    options.signal.addEventListener("abort", () => reject(new Error("private network detail")), { once: true });
-  }));
-  h.context.chrome.permissions.contains = async () => false;
-  await h.dispatch(completion("no-permission"), sender(h));
-  assert.match(h.summary().error, /Allow OpenRouter/);
+test("Logic summaries are local, bounded, deduplicated and independent of provider settings", async () => {
+  const h = await setup(async () => {throw new Error("must not call provider");}, {});
+  await h.dispatch(completion(), sender(h));
+  assert.equal(h.summary().last.text, "Change implemented and checked.");
+  assert.equal(h.summary().last.model, "Logic Mode");
+  assert.equal((await h.dispatch(completion(), sender(h))).deduplicated, true);
   assert.equal(h.calls.length, 0);
-  h.context.chrome.permissions.contains = async () => true;
-  h.context.setTimeout = (callback, ms) => setTimeout(callback, ms === 25000 ? 5 : ms);
-  await h.dispatch(completion("timeout"), sender(h));
-  assert.equal(h.calls.length, 1);
-  assert.match(h.summary().error, /timeout/);
-  assert.equal(h.summary().error.includes("private network detail"), false);
-});
-
-test("clearing during capture preparation prevents an old request from being sent", async () => {
-  const h = await setup();
-  const crypto = h.context.crypto;
-  let release;
-  h.context.crypto = { subtle: { digest: (...args) => new Promise(resolve => {
-    release = async () => resolve(await crypto.subtle.digest(...args));
-  }) } };
-  const request = h.dispatch(completion(), sender(h));
-  while (!release) await h.flush();
-  await h.dispatch({ type: "SUM_CLEAR" });
-  await release(); await request;
-  assert.equal(h.calls.length, 0);
-  assert.equal(h.summary(), undefined);
-});
-
-test("rate-limit cooldown is shared across agents, honors Retry-After, and survives a worker restart", async () => {
-  let now = Date.parse("2026-11-15T06:00:00Z"); class Clock extends Date { static now() { return now; } }
-  const configure = context => { context.Date = Clock; };
-  const h = await setup(async () => ({ok:false,status:429,headers:{get:() => "120"}}), saved, configure);
-  await h.dispatch(completion("rate"), sender(h));
-  assert.equal(h.local.values.logicSummaryCooldown.until, now + 120000);
-  const other = {id:popup.id,frameId:0,url:h.tabs.get(99).url,tab:{...h.tabs.get(99)}};
-  await h.dispatch({...completion("other"),url:other.url}, other);
-  assert.equal(h.calls.length,1,"other agents do not call the provider during cooldown");
-  assert.match(h.local.values[RECORDS][other.url].error,/cooling down/);
-  const restarted = await setup(undefined,h.local.values,configure);
-  await restarted.dispatch(completion("restarted"),sender(restarted));
-  assert.equal(restarted.calls.length,0,"worker restarts do not bypass cooldown");
-  now += 120001;
-  await restarted.dispatch(completion("after"),sender(restarted));
-  assert.equal(restarted.calls.length,1,"only a new output after cooldown is sent");
-  const report=(await h.dispatch({type:"DG_EXPORT"})).report;
-  assert.ok(report.events.some(e=>e.reason==="summary_rate_limit"&&e.httpStatus===429));
-  assert.ok(report.events.some(e=>e.reason==="summary_cooldown"));
-});
-
-test("repeated rate limits back off and HTTP-date Retry-After is respected", async () => {
-  let now = Date.parse("2026-11-15T06:00:00Z"), header = "invalid";
-  class Clock extends Date { static now() { return now; } }
-  const h=await setup(async()=>({ok:false,status:429,headers:{get:()=>header}}),saved,c=>{c.Date=Clock;});
-  await h.dispatch(completion("one"),sender(h));
-  assert.equal(h.local.values.logicSummaryCooldown.until,now+60000);
-  now+=60001;
-  await h.dispatch(completion("two"),sender(h));
-  assert.equal(h.local.values.logicSummaryCooldown.until,now+120000);
-  now+=120001; header=new Date(now+600000).toUTCString();
-  await h.dispatch(completion("three"),sender(h));
-  assert.equal(h.local.values.logicSummaryCooldown.until,Date.parse(header));
-});
-
-test("summary diagnostics distinguish network, timeout, cancellation and malformed JSON without private text", async () => {
-  const secret="PRIVATE_PROVIDER_DETAIL";
-  for(const kind of ["network","timeout","cancelled","response"]) {
-    const h=await setup((_url,options)=>{
-      if(kind==="network")throw new TypeError(secret);
-      if(kind==="response")return {ok:true,status:200,json:async()=>{throw new SyntaxError(secret);}};
-      return new Promise((_resolve,reject)=>options.signal.addEventListener("abort",()=>reject(new Error(secret)),{once:true}));
-    });
-    h.context.setTimeout=(callback,ms)=>setTimeout(callback,ms===25000?10:ms);
-    const pending=h.dispatch(completion("classified"),sender(h));
-    if(kind==="cancelled") {
-      while(!h.calls.length)await h.flush();
-      await h.dispatch({type:"SUM_SAVE",enabled:false});
-    }
-    await pending;
-    const report=(await h.dispatch({type:"DG_EXPORT"})).report;
-    const error=report.events.find(e=>e.event==="summary_error");
-    assert.equal(error.reason,"summary_"+kind,kind);
-    assert.equal(error.inputLength,completion().output.length);
-    assert.equal(error.responseHeadersReceived,kind==="response");
-    assert.equal(report.incidents.length,1);
-    assert.equal(JSON.stringify(report).includes(secret),false);
-    assert.equal(JSON.stringify(report).includes(completion().output),false);
-    assert.equal(JSON.stringify(report).includes("invented-test-key"),false);
-    assert.equal(h.summary().error.includes(secret),false);
+  assert.equal(JSON.stringify(h.local.values).includes("Implemented the requested change."), false);
+  for (const [id, output] of [
+    ["old", "Done.\n[[LOGIC:IDLE]]"],
+    ["long", `[[LOGIC:SUMMARY: ${"a".repeat(601)}]]\n[[LOGIC:IDLE]]`],
+    ["duplicate", "[[LOGIC:SUMMARY: First]]\n[[LOGIC:SUMMARY: Second]]\n[[LOGIC:IDLE]]"],
+    ["trailing", "[[LOGIC:SUMMARY: Done]]\n[[LOGIC:IDLE]]\nMore"],
+    ["wrongflag", "[[LOGIC:SUMMARY: Done]]\n[[LOGIC:CONTINUE]]"]
+  ]) {
+    await h.dispatch(completion(id,output), sender(h));
+    assert.equal(h.summary().status, "error", id);
+    assert.equal(h.summary().last.text, "Change implemented and checked.");
   }
+  await h.dispatch(completion("boundary", `[[LOGIC:SUMMARY: ${"a".repeat(600)}]]\n[[LOGIC:IDLE]]`), sender(h));
+  assert.equal(h.summary().last.text.length, 600);
+  await h.dispatch(completion("rendered-paragraphs", "[[LOGIC:SUMMARY: Paragraph spacing.]]\n\n[[LOGIC:IDLE]]"),sender(h));
+  assert.equal(h.summary().last.text,"Paragraph spacing.");
+  await h.dispatch({type:"SUM_CLEAR"});
+  assert.equal(h.summary(), undefined);
+  assert.equal(h.calls.length, 0);
 });
 
-test("settings require host permission, keep keys private, and preserve a saved key on blank updates", async () => {
-  const h = await setup(undefined, {});
-  assert.equal((await h.dispatch({ type: "SUM_GET" })).enabled, false);
-  assert.equal((await h.dispatch({ type: "SUM_SAVE", enabled: true })).ok, false);
-  h.context.chrome.permissions.contains = async () => false;
-  assert.equal((await h.dispatch({ type: "SUM_SAVE", enabled: true, apiKey: "example-key" })).ok, false);
-  h.context.chrome.permissions.contains = async () => true;
-  const savedSettings = await h.dispatch({ type: "SUM_SAVE", enabled: true, apiKey: "example-key" });
-  assert.equal(savedSettings.keySaved, true);
-  assert.equal(JSON.stringify(savedSettings).includes("example-key"), false);
-  await h.dispatch({ type: "SUM_SAVE", enabled: false, apiKey: "" });
-  assert.equal(h.local.values[CONFIG].apiKey, "example-key");
-  h.context.chrome.runtime.getManifest = () => ({ version: "1.10.0" });
-  const backup = await h.dispatch({ type: "SETTINGS_EXPORT_SNAPSHOT" });
-  assert.equal(JSON.stringify(backup).includes("example-key"), false, "summary API key is not exported");
-  assert.equal(backup.logicRunSummaries, undefined);
+test("all control endings permit SUMMARY and BRIEF still reaches input notifications", async () => {
+  const h = await setup();
+  for (const [tag,flag] of [["CONTINUE","continue"],["WAIT:15m","wait"],["WAIT:999m","invalid_wait"],["IDLE","idle"],["USER_INPUT","user_input"]]) {
+    await h.dispatch({...completion(tag, `Result.\n[[LOGIC:BRIEF: Choose a format.]]\n[[LOGIC:SUMMARY: Waiting for a format.]]\n[[LOGIC:${tag}]]`),flag}, sender(h));
+    assert.equal(h.summary().status,"ready",tag);
+  }
+  const f = fixture();
+  f.api.setResponseForTest("Choose a format.\n[[LOGIC:BRIEF: Choose PDF or text.]]\n[[LOGIC:SUMMARY: Waiting for format selection.]]\n[[LOGIC:USER_INPUT]]");
+  await f.api.runLogicMode(f.api.state.runId,true);
+  assert.equal(f.api.state.userInputBrief,"Choose PDF or text.");
+});
+
+test("only an explicit trusted Rewrite request sends the selected draft and keeps results out of storage", async () => {
+  const h = await setup(async () => result("Please inspect the current queue."));
+  const req = {type:"SUM_REWRITE",text:"inspect teh que",limit:4000};
+  assert.equal((await h.dispatch(req,sender(h))).ok,false);
+  for (const source of [popup,{...sender(h),frameId:1},{...sender(h),id:"foreign"}]) {
+    assert.equal((await h.dispatch(completion(),source)).ok,false);
+  }
+  const r = await h.dispatch(req); assert.equal(r.text,"Please inspect the current queue.");
+  const body = JSON.parse(h.calls[0][1].body);
+  assert.equal(body.messages[1].content,req.text); assert.equal(body.model,"openrouter/free");
+  assert.equal(body.max_completion_tokens,4096);
+  assert.equal(h.calls[0][1].redirect,"error");
+  assert.equal(JSON.stringify(h.local.values).includes(req.text),false);
+  assert.equal(JSON.stringify(h.local.values).includes(r.text),false);
+  assert.equal((await h.dispatch({...req,text:"x".repeat(4001)})).ok,false);
+  assert.equal(h.calls.length,1);
+  assert.equal((await h.context.DashboardWorker.remote({...req,text:"A LAN draft"})).ok,true);
+});
+
+test("Rewrite failures preserve privacy and shared cooldown survives worker restart", async () => {
+  let now=Date.now(); class Clock extends Date {static now(){return now;}}
+  const configure=c=>{c.Date=Clock;};
+  const h=await setup(async()=>({ok:false,status:429,headers:{get:()=>"120"}}),saved,configure);
+  const req={type:"SUM_REWRITE",text:"private draft",limit:8000};
+  assert.match((await h.dispatch(req)).error,/rate limit/);
+  assert.match((await h.dispatch(req)).error,/cooling down/); assert.equal(h.calls.length,1);
+  const restarted=await setup(async()=>result("Clear request"),h.local.values,configure);
+  assert.match((await restarted.dispatch(req)).error,/cooling down/); assert.equal(restarted.calls.length,0);
+  now+=120001;
+  assert.equal((await restarted.dispatch(req)).text,"Clear request");
+  for (const response of [{ok:true,json:async()=>({error:{message:"private provider body"}})},result("x".repeat(8001)),{ok:true,json:async()=>{throw new SyntaxError("private body");}}]) {
+    const failing=await setup(async()=>response);
+    const r=await failing.dispatch(req); assert.equal(r.ok,false); assert.equal(r.error.includes("private"),false);
+  }
+  const network=await setup(async()=>{throw new Error("private network detail");});
+  assert.match((await network.dispatch(req)).error,/network/);
+  const report = (await network.dispatch({type:"DG_EXPORT"})).report;
+  assert.ok(report.events.some(e=>e.event==="rewrite_error" && e.reason==="rewrite_network"));
+  assert.equal(JSON.stringify(report).includes(req.text),false);
+  const timed=await setup((_u,o)=>new Promise((_r,reject)=>o.signal.addEventListener("abort",()=>reject(new Error("aborted")))),saved,c=>{c.setTimeout=(fn,ms)=>setTimeout(fn,ms===25000?5:ms);});
+  assert.match((await timed.dispatch(req)).error,/timed out/);
+});
+
+test("Rewrite limits concurrency and rejects cancellation after settings change", async()=>{
+  const pending=[];
+  const h=await setup((_u,o)=>new Promise(resolve=>pending.push({resolve,o})));
+  const req={type:"SUM_REWRITE",text:"Clarify this",limit:4000};
+  const first=h.dispatch(req),second=h.dispatch(req);
+  while(pending.length<2) await h.flush();
+  assert.match((await h.dispatch(req)).error,/already in progress/);
+  await h.dispatch({type:"SUM_FORGET"});
+  pending.forEach(p=>p.resolve(result("Late rewrite")));
+  for(const r of await Promise.all([first,second])) assert.match(r.error,/cancelled/);
+  assert.equal((await h.dispatch({type:"SUM_GET"})).keySaved,false);
+  assert.equal(h.calls.length,2);
+});
+
+test("a delayed authorization cannot replace a newer local summary",async()=>{
+  const h=await setup();let release,first=true;
+  h.context.isTrustedChatSender=async()=>{if(first){first=false;await new Promise(r=>{release=r;});}return true;};
+  const old=h.dispatch(completion("old","[[LOGIC:SUMMARY: Older result.]]\n[[LOGIC:IDLE]]"),sender(h));
+  while(!release)await h.flush();
+  await h.dispatch(completion("new","[[LOGIC:SUMMARY: Newer result.]]\n[[LOGIC:IDLE]]"),sender(h));
+  release();await old;
+  assert.equal(h.summary().last.text,"Newer result.");
 });

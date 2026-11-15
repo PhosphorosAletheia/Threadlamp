@@ -132,7 +132,10 @@ Dashboard state, queued message text, summaries, heartbeat prompts, and commands
 travel over HTTPS between the device and helper, then over an authenticated
 loopback WebSocket to Chrome. The helper keeps sessions and pending requests in
 memory. It does not log or save message bodies. The existing extension continues
-to store its normal settings and dashboard history.
+to store its settings, dashboard history and durable message queues. Rewrite for
+agent is available in remote message editors: the browser extension sends only
+the chosen draft to OpenRouter using the key saved on the host. API keys are not
+sent to the remote dashboard. Summaries are read locally from Logic SUMMARY tags.
 
 The helper accepts an explicit set of dashboard operations. Existing conversation,
 page-instance, revision, and command-receipt checks still apply. It cannot serve

@@ -57,26 +57,30 @@
   const LOGIC_START_PROMPT = `
 Start Logic Mode for this conversation.
 
-From this response onward, finish every response with exactly one of these markers on its own final line:
+From this response onward, finish every response with exactly one of these control markers on its own final line:
 ${LOGIC_CONTINUE_FLAG}
 Use this when you can continue the current task without any information, decision, approval, or action from the user.
 
 ${LOGIC_USER_INPUT_FLAG}
 Use this when you need information, a decision, approval, clarification, or an action from the user before continuing.
-Immediately before this marker, add exactly one plain-text line in this format:
+Before the SUMMARY line and this control marker, add exactly one plain-text line in this format:
 [[LOGIC:BRIEF: <brief>]]
 The text <brief> is a placeholder, not fixed text. For every USER_INPUT response, replace it with a new, response-specific summary of exactly what you are asking the user to provide, decide, or approve. State the actual subject and include short options when useful. Never output the literal text <brief>, never reuse an example as canned text, and never use a generic phrase such as "approval needed." Keep the generated brief to 240 characters or fewer and do not include line breaks, brackets, credentials, secrets, or unnecessary conversation details.
 
 ${LOGIC_WAIT_FLAG}
 Use this only after you have started an external operation that is still running after your response ends. Replace <minutes> with a whole number from 1 through 120 representing the earliest useful time to check the operation again. Never output the literal <minutes> placeholder. Choose the duration based on the operation instead of always using the same value. If you are uncertain, use 10m. When the requested wait ends, the extension will send "Status" so you can check the operation again.
 
-Do not put the marker in a code block. Do not write anything after the marker. Always include exactly one marker. Begin or continue the current task now.
+Do not put the marker in a code block. Do not write anything after the marker. Always include exactly one final control marker. Begin or continue the current task now.
 
 ${LOGIC_IDLE_FLAG}
 Use this when the current work cycle is complete and there is no work due now. The extension will sleep until the next heartbeat. If this saved chat has no schedule, it creates an hourly heartbeat; explicitly paused or disabled schedules remain off. A new user message returns the chat to Logic Mode and suspends heartbeat wakeups until IDLE again. Do not keep working merely to fill time. Use WAIT only for an external operation already underway, and USER_INPUT when human input is required.
+
+Immediately before the final control marker, include exactly one plain-text summary line:
+[[LOGIC:SUMMARY: <summary>]]
+Replace <summary> with a concise summary of this response's work, results, and any blocker or next step, at most 600 characters. Do not include line breaks, brackets, secrets, or unnecessary personal details. Never output the literal placeholder. For USER_INPUT, place BRIEF first, SUMMARY next, and USER_INPUT last. For all other endings, place SUMMARY immediately before the control marker. Do not put these lines in a code block. Nothing may follow the final control marker.
   `.trim();
   const LOGIC_STOP_PROMPT = `
-Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_INPUT_FLAG}, ${LOGIC_WAIT_FLAG}, ${LOGIC_IDLE_FLAG}, and LOGIC:BRIEF markers to your responses. Continue responding normally without these markers.
+Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_INPUT_FLAG}, ${LOGIC_WAIT_FLAG}, ${LOGIC_IDLE_FLAG}, LOGIC:BRIEF, and LOGIC:SUMMARY markers to your responses. Continue responding normally without these markers.
   `.trim();
   const MAX_LENGTH_MESSAGE = normalizeText(
     "You've reached the maximum length for this conversation, but you can keep talking by starting a new chat."
@@ -975,7 +979,7 @@ ${LOGIC_START_PROMPT}
       .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
       .trim();
     const match = cleaned.match(
-      /(?:^|\n)\s*\[\[LOGIC:BRIEF:\s*([^\r\n]*?)\s*\]\]\s*\n\s*\[\[LOGIC:USER_INPUT\]\]\s*$/i
+      /(?:^|\n)\s*\[\[LOGIC:BRIEF:\s*([^\r\n]*?)\s*\]\]\s*\n(?:\s*\[\[LOGIC:SUMMARY: [^\r\n\[\]]{1,600}\]\]\s*\n)?\s*\[\[LOGIC:USER_INPUT\]\]\s*$/i
     );
     if (!match) return "";
 
@@ -1033,8 +1037,8 @@ ${LOGIC_START_PROMPT}
       && !snapshotChanged(user, serverInputWait.baseline);
     return { ...publicStatus(), projectTitle: dashboardProjectTitle(), url: window.location.href.split(/[?#]/)[0], instanceId: heartbeatInstanceId,
       revision: String(dashboardRevision), message: state.message || "Continue", limit: state.limit || 5,
-      hasDraft: draft, generating, queuedPrompt: queuedPrompts[0]?.text || "", queueNote: queuedPromptNote,
-      queuedPrompts: queuedPrompts.map(({id, text}) => ({id, text, preparing: queuedPromptInFlight?.id === id})),
+      hasDraft: draft, generating, queuedPrompt: queuedPrompts[0]?.url === window.location.href ? queuedPrompts[0].text : "", queueNote: queuedPromptNote,
+      queuedPrompts: queuedPrompts.filter(item => item.url === window.location.href).map(({id, text}) => ({id, text, preparing: queuedPromptInFlight?.id === id})),
       queueLimits: {items: QUEUED_PROMPT_COUNT_LIMIT, total: QUEUED_PROMPT_TOTAL_LIMIT},
       capabilities: {
         start_loop: idle, start_logic: idle, resume_logic: idle,
@@ -1102,6 +1106,7 @@ ${LOGIC_START_PROMPT}
   }
 
   async function executeDashboardCommand(request) {
+    await queueStore.ready;
     if (dashboardCommands.has(request.commandId)) return dashboardCommands.get(request.commandId);
     if (dashboardCommandBusy) return { ok: false, error: "Another dashboard command is in progress." };
     const snapshot = dashboardSnapshot(), target = request.target;
@@ -1129,6 +1134,7 @@ ${LOGIC_START_PROMPT}
       else if (action === "remove_queue") { if (!removeAdditionalPrompt(payload.id)) throw new Error("That queued message is no longer available or is being prepared."); }
       else if (action === "cancel_queue") { if (!cancelAdditionalPrompt()) throw new Error("The queued prompt is already being prepared."); }
       else result = await sendDashboardText(["reply", "approve"].includes(action) ? payload.text : action, ["reply", "approve"].includes(action), target);
+      await queueStore.flush();
       result ||= { ok: true, detail: "Command accepted.", status: dashboardSnapshot() };
     } catch (error) { result = { ok: false, error: error.message }; }
     finally { dashboardCommandBusy = false; }
@@ -1793,7 +1799,12 @@ ${LOGIC_START_PROMPT}
     state.rolloverEnabled = true;
     state.rolloverRequestId = null;
     state.runId += 1;
-    queuedPrompts = additionalPrompts.map(item => ({ ...item, url: window.location.href }));
+    const handoffRunId = state.runId;
+    state.logicPhase = "rolling_over";
+    const restored = await queueStore.handoff(pending.requestId);
+    if (state.runId !== handoffRunId || window.location.href !== destinationUrl) return false;
+    state.logicPhase = "starting";
+    queuedPrompts = restored.items.map(item => ({...item, url:window.location.href}));
     queuedPromptNote = additionalPrompts.length ? "Queued for the continuation in this chat." : "";
     setDetail(`Continuing project chat “${previousTitle}”…`);
     void runLogicMode(
@@ -1858,6 +1869,7 @@ ${LOGIC_START_PROMPT}
     let previousTitle = "";
 
     try {
+      await queueStore.flush();
       const projectSegment = projectSegmentFromLocation();
       previousTitle = currentConversationTitle();
       const rolloverAction = findProjectRolloverAction();
@@ -1898,7 +1910,7 @@ ${LOGIC_START_PROMPT}
         projectHomeUrl: rolloverAction.kind === "project_home" ? rolloverAction.url : "",
         previousTitle,
         message: state.message,
-        queuedPrompts: queuedPrompts.map(({id, text}) => ({id, text})),
+        queuedPrompts: queuedPrompts.filter(item => item.url === window.location.href).map(({id, text}) => ({id, text})),
         sourceUserFingerprint,
         limit: state.limit,
         count: state.count
@@ -2369,6 +2381,16 @@ ${LOGIC_START_PROMPT}
     return total <= QUEUED_PROMPT_TOTAL_LIMIT ? items.map(({id, text}) => ({id, text})) : null;
   }
 
+  const queueStore = new ThreadlampQueueStore(items => {
+    queuedPrompts = items;
+    queuedPromptNote = items.length ? "Saved queue restored. Resume Logic Mode when ready." : "";
+    updateOverlay(); publishDashboardStatus();
+  }, error => {
+    state.running = false; state.error = true; state.runId += 1;
+    setDetail(`Queue storage error: ${error.message}`, true, true);
+  });
+  function persistQueue() {return queueStore.save(queuedPrompts);}
+
   function queuedPromptForLocation() {
     if (queuedPrompts.some(item => item.url !== window.location.href)) {
       throw new Error("The chat changed with unsent queued messages. Clear the queue before continuing in another chat.");
@@ -2377,7 +2399,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function canQueuePrompt() {
-    return (state.running || isIdleLogicCycle()) && state.mode === "logic"
+    return queueStore.loaded && !queueStore.error && (state.running || isIdleLogicCycle()) && state.mode === "logic"
       && !["stopping", "rolling_over"].includes(state.logicPhase)
       && queuedPrompts.length < QUEUED_PROMPT_COUNT_LIMIT
       && queuedPrompts.reduce((total, item) => total + item.text.length, 0) < QUEUED_PROMPT_TOTAL_LIMIT
@@ -2391,23 +2413,28 @@ ${LOGIC_START_PROMPT}
     if (!clean || clean.length > QUEUED_PROMPT_LIMIT
       || queuedPrompts.reduce((total, item) => total + item.text.length, 0) + clean.length > QUEUED_PROMPT_TOTAL_LIMIT) return false;
     queuedPrompts.push({ id: crypto.randomUUID(), text: clean, url: window.location.href });
+    void persistQueue();
     queuedPromptNote = "Added to the queue. One message is included per automatic round.";
     updateOverlay();
     return true;
   }
 
   function removeAdditionalPrompt(id) {
+    if (!queueStore.loaded || queueStore.error || queuedPrompts.some(item => item.url !== window.location.href)) return false;
     const item = queuedPrompts.find(entry => entry.id === id);
     if (!item || item === queuedPromptInFlight || state.logicPhase === "rolling_over") return false;
     queuedPrompts = queuedPrompts.filter(entry => entry !== item);
+    void persistQueue();
     queuedPromptNote = "Queued message removed.";
     updateOverlay();
     return true;
   }
 
   function cancelAdditionalPrompt() {
-    if (queuedPromptInFlight || state.logicPhase === "rolling_over") return false;
+    if (!queueStore.loaded || queueStore.error || queuedPrompts.some(item => item.url !== window.location.href)
+      || queuedPromptInFlight || state.logicPhase === "rolling_over") return false;
     queuedPrompts = [];
+    void persistQueue();
     queuedPromptNote = "Queue cleared.";
     updateOverlay();
     return true;
@@ -2748,6 +2775,9 @@ ${LOGIC_START_PROMPT}
   }
 
   function updateQuickActions() {
+    if (!state.running && !queuedPromptInFlight && queueStore.loaded && !queueStore.error
+      && queueStore.url && queueStore.url !== window.location.href
+      && /\/c\/[^/]+|\/g\/g-p-[a-f0-9]{32}|^\/$/i.test(window.location.pathname)) void queueStore.attach();
     if (overlayHost && !overlayHost.isConnected) {
       updateOverlay();
       if (overlayHost?.isConnected) recordDiagnostic("overlay_restored");
@@ -2912,6 +2942,11 @@ ${LOGIC_START_PROMPT}
         || Date.now() <= submitted.deadline + SEND_ENABLE_TIMEOUT_MS);
       if (matchesSubmission(user) && (!submitted.verifiedUserId || messageId === submitted.verifiedUserId)
         && (beforeDeadline || lateEvidence)) {
+        await queueStore.move();
+        if (!state.running || state.runId !== runId) return;
+        if (owner !== runOwnership || chatIdentity() !== destinationIdentity || !matchesSubmission(latestMessageSnapshot("user"))) {
+          throw new Error("The chat changed while saving its queue. Automatic sending stopped.");
+        }
         for (const item of queuedPrompts) { if (item.url === owner.url) item.url = window.location.href; }
         owner.identity = chatIdentity(); owner.url = window.location.href;
         recordDiagnostic("identity_adopted", {confirmationExpired:!beforeDeadline, submissionTextMatches:true,
@@ -3095,6 +3130,7 @@ ${LOGIC_START_PROMPT}
     requireServerEvent = false,
     heartbeatHandoff = null
   ) {
+    await queueStore.flush();
     const composer = await waitForReady(runId, readyTimeoutMs);
     if (!composer || !state.running || state.runId !== runId) return false;
     if (!await waitForLogicResume(runId)) return false;
@@ -3199,7 +3235,17 @@ ${LOGIC_START_PROMPT}
       if (addition) {
         // Once Send is attempted, delivery can be uncertain. Never automatically
         // replay the user's extra instructions after a timeout or restart.
-        queuedPrompts = queuedPrompts.filter(item => item !== addition);
+        const remaining = queuedPrompts.filter(item => item !== addition);
+        queuedPrompts = remaining;
+        await queueStore.save(remaining);
+        // The save yields: recheck the run, draft and project before clicking.
+        if (!state.running || state.runId !== runId) return false;
+        checkAddition(text.trim());
+        if (sendGuard && !await sendGuard(composer, text.trim())) return false;
+        if (!state.running || state.runId !== runId) return false;
+        checkAddition(text.trim());
+        sendButton = findSendButton();
+        if (!buttonIsEnabled(sendButton)) throw new Error("The ChatGPT Send button is unavailable.");
         queuedPromptNote = "Queued prompt included in the send attempt. Check the chat if delivery fails.";
         updatePromptControls();
       }
@@ -3990,6 +4036,7 @@ ${LOGIC_START_PROMPT}
 
   function startLoop(message, limit) {
     if (state.running || reconnectRestoring) return publicStatus();
+    if (queueStore.url && queueStore.url !== window.location.href) void queueStore.attach();
 
     const cleanMessage = typeof message === "string" ? message.trim() : "";
     const cleanLimit = Number.parseInt(limit, 10);
@@ -4038,6 +4085,7 @@ ${LOGIC_START_PROMPT}
 
   function startLogicMode(message, limit, rolloverEnabled = false) {
     if (state.running || reconnectRestoring) return publicStatus();
+    if (queueStore.url && queueStore.url !== window.location.href) void queueStore.attach();
 
     const cleanMessage = typeof message === "string" ? message.trim() : "";
     const cleanLimit = Number.parseInt(limit, 10);
@@ -4081,6 +4129,7 @@ ${LOGIC_START_PROMPT}
 
   function resumeLogicMode(message, limit, rolloverEnabled = false) {
     if (state.running || reconnectRestoring) return publicStatus();
+    if (queueStore.url && queueStore.url !== window.location.href) void queueStore.attach();
 
     const cleanMessage = typeof message === "string" ? message.trim() : "";
     const cleanLimit = Number.parseInt(limit, 10);
@@ -4123,8 +4172,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function stopLogicMode() {
-    queuedPrompts = [];
-    queuedPromptNote = "";
+    queuedPromptNote = queuedPrompts.length ? "Queue preserved while Logic Mode is stopped." : "";
     disableHeartbeat();
     if (!state.running && state.mode === "logic" && state.logicPhase === "idle") {
       idleLogicUrl = "";
@@ -4352,10 +4400,10 @@ ${LOGIC_START_PROMPT}
 
   createQuickActions();
   updateQuickActions();
-  void restoreLogicReconnect().finally(() => {
+  void queueStore.ready.then(() => restoreLogicReconnect()).then(() => {
     void claimPendingLogicRollover();
     void attachHeartbeat();
-  });
+  }).catch(() => {});
   window.setInterval(() => { void monitorLogicReconnect().catch(() => {}); }, 1000);
   if (typeof ServerLink !== "undefined" && ServerLink.chatKey(window.location.href)) {
     // Detect an abandoned send claim after a page reload without sending a prompt.

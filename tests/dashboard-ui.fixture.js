@@ -14,7 +14,8 @@ const root = path.resolve(__dirname, "..");
 for (const file of ["dashboard.css", "brand.css", "dashboard.js", "heartbeat.js"]) fs.copyFileSync(path.join(root, file), path.join(output, file));
 function mock() {
   const actions = [];
-  let uncertainBroadcast = false, onQueueRequest = null;
+  let uncertainBroadcast = false, onQueueRequest = null, rewriteResolver = null;
+  const rewrites = [];
   const caps = { start_loop: false, start_logic: false, resume_logic: false, stop: true, pause: true, resume: false,
     next_cycle: false, queue: true, queue_append: true, remove_queue: true, cancel_queue: false, continue: false, status: false, reply: false, approve: false };
   const base = { online: true, revision: "1", mode: "logic", logicPhase: "monitoring", running: true, count: 2, limit: 10,
@@ -34,6 +35,7 @@ function mock() {
   let inspectedSchedule = configuration;
   globalThis.chrome = {
     runtime: { openOptionsPage: async () => {}, sendMessage: async request => {
+      if (request.type === "SUM_REWRITE") {rewrites.push(request); return new Promise(resolve => {rewriteResolver = resolve;});}
       if (request.type === "DG_GET" || request.type === "DG_SET" || request.type === "DG_CLEAR") return {ok:true,enabled:true,eventCount:12,incidentCount:1};
       if (request.type === "DG_EXPORT") return {ok:true,report:{schema:1,events:[],incidents:[]}};
       if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.12.1" });
@@ -263,6 +265,34 @@ function mock() {
       if (innerWidth > 720 && innerHeight >= 700) {
         const queueButton = document.querySelector('[data-action="queue"]').getBoundingClientRect();
         assert(queueButton.bottom <= document.querySelector(".app-status").getBoundingClientRect().top, "Primary queue action is above the fold on laptop screens");
+      }
+      await select(17); tab("queue");
+      assert(document.querySelectorAll("[data-rewrite-for]").length === 5, "Every message editor has a Rewrite button");
+      const actionCount = actions.length;
+      input("queued", "Please chek teh logs"); click('[data-rewrite-for="queued"]'); await wait();
+      assert(rewrites.at(-1).text === "Please chek teh logs" && rewrites.at(-1).limit === 8000, "Rewrite sends only the chosen draft");
+      rewriteResolver({ok:true,text:"Please check the logs."}); await wait();
+      assert($("queued").value === "Please check the logs.", "Rewrite replaces the draft");
+      document.querySelector('#queue-form .rewrite-controls button:nth-child(2)').click();
+      assert($("queued").value === "Please chek teh logs", "Undo restores the original");
+      click('[data-rewrite-for="queued"]'); await wait();
+      input("queued", "Edit during request"); input("queued", "Please chek teh logs");
+      rewriteResolver({ok:true,text:"Stale rewrite"}); await wait();
+      assert($("queued").value === "Please chek teh logs", "Editing away and back fences a stale rewrite");
+      click('[data-rewrite-for="queued"]'); await wait();
+      await select(18); tab("queue"); input("queued", "Other agent draft");
+      rewriteResolver({ok:true,text:"Wrong agent rewrite"}); await wait();
+      assert($("queued").value === "Other agent draft", "Agent switches preserve the destination draft");
+      await select(17); tab("queue");
+      click('[data-rewrite-for="queued"]'); await wait();
+      rewriteResolver({ok:false,error:"Provider unavailable"}); await wait();
+      assert($("queued").value === "Please chek teh logs", "Provider failure preserves the draft");
+      assert(actions.length === actionCount, "Rewrite and Undo never send or queue messages");
+      for (const [props,css] of [[{running:true,paused:false,error:false,logicPhase:"monitoring"},"running"],
+        [{paused:true},"paused"],[{paused:false,logicPhase:"waiting_user"},"waiting"],
+        [{error:true},"error"],[{error:false,running:false,logicPhase:"idle"},"stopped"]]) {
+        Object.assign(agents[0],props);click("#refresh");await wait();
+        assert(document.querySelector('.agent-select[data-agent-key^="17:"] .status-dot').classList.contains(css), "State dot: "+css);
       }
       assert(errors.length === 0, errors.join("; "));
       const report = document.createElement("pre"); report.id = "smoke-result"; report.textContent = "PASS: idle heartbeat shortcut and guards, multi-entry add/remove, literal text rendering, project selection, priority ordering, tabs, keyboard, queue, broadcasts, partial results, deduplication, reply, approvals, pause/resume, heartbeat, activity filters, dialogs, focus, offline guards, draft retention, viewport layout; no browser errors";

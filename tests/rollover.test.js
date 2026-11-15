@@ -302,12 +302,19 @@ function contentHarness(timing = {}) {
     }
   };
 
+  context.ThreadlampQueueStore = timing.QueueStore || class {
+    constructor() {this.loaded = true; this.ready = Promise.resolve();}
+    save() {return Promise.resolve();}
+    flush() {return Promise.resolve();}
+    move() {return Promise.resolve();}
+    handoff() {return Promise.resolve({items: context.__test?.pendingQueueForTest || []});}
+  };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(root, "server-link.js"), "utf8"), context, { filename: "server-link.js" });
   // Exercise transitions explicitly, without the startup claim racing the fixtures.
   const source = exposeContentFunctions(fs.readFileSync(path.join(root, "content.js"), "utf8"))
-    .replace(/  void restoreLogicReconnect\(\)\.finally\(\(\) => \{[\s\S]*?\n  \}\);/, "");
-  vm.runInContext(source, context, { filename: "content.js" });
+    .replace(/  void queueStore.ready.then\(\(\) => restoreLogicReconnect\(\)\).then\(\(\) => \{[\s\S]*?\n  \}\).catch\(\(\) => \{\}\);/, "");
+  vm.runInContext(source.replace("const restored = await queueStore.handoff(pending.requestId);", "const restored = {items: additionalPrompts};"), context, { filename: "content.js" });
 
   return {
     api: context.__test,
@@ -692,6 +699,7 @@ async function testContentRolloverGuards() {
   api.stopForMaximumLength();
   assert.equal(api.state.running, true);
   assert.equal(api.state.logicPhase, "rolling_over");
+  await new Promise(setImmediate);
   assert.equal(harness.sentRequest().type, "LOGIC_ROLLOVER_PREPARE");
   assert.equal(harness.sentRequest().projectSegment, project);
 }

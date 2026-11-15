@@ -7,6 +7,8 @@ const {init,privateHost} = require("../helper/cli.js"), {createHelper} = require
 const protocol = require("../lan-protocol.js");
 async function freePort() { const server=net.createServer(); server.listen(0,"127.0.0.1"); await once(server,"listening"); const port=server.address().port; await new Promise(r=>server.close(r)); return port; }
 test("LAN helper authenticates, restricts authority, and never replays uncertain commands", async t => {
+  assert.equal(protocol.allowed({type:"SUM_REWRITE",text:"A draft",limit:4000}),true);
+  for(const type of ["SUM_GET","SUM_SAVE","SUM_FORGET","SUM_CLEAR","SUM_COMPLETE","Q_LOAD","Q_SAVE"]) assert.equal(protocol.allowed({type}),false);
   const parent=fs.mkdtempSync(path.join(os.tmpdir(),"threadlamp-lan-test-")), dir=path.join(parent,"private");
   const port=await freePort(), bridgePort=await freePort();
   init(dir,"127.0.0.1",port,bridgePort);

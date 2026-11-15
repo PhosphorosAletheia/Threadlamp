@@ -7,7 +7,7 @@
     "queue", "queue_append", "remove_queue", "cancel_queue", "continue", "status", "reply", "approve",
     "heartbeat_save", "heartbeat_run", "heartbeat_pause", "heartbeat_resume", "heartbeat_disable",
     "server_setup", "server_recover", "server_assign", "server_enable", "server_disable", "server_resolve"]);
-  const types = new Set(["DB_LIST", "DB_INSPECT", "DB_DISMISS", "DB_CLEAR_HISTORY", "DB_COMMAND",
+  const types = new Set(["SUM_REWRITE", "DB_LIST", "DB_INSPECT", "DB_DISMISS", "DB_CLEAR_HISTORY", "DB_COMMAND",
     "ALERT_GET_SETTINGS", "ALERT_SET_SETTINGS", "ALERT_TEST_SOUND", "HA_GET_SETTINGS",
     "LAN_OPEN_CHAT", "LAN_OPEN_OPTIONS", "LAN_LOOPBACK_PERMISSION", "DG_GET", "DG_SET", "DG_CLEAR", "DG_EXPORT"]);
   function allowed(request) {

@@ -60,7 +60,7 @@ async function sendToPage(payload) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ["server-link.js", "content.js"]
+        files: ["server-link.js", "diagnostics-schema.js", "queue-client.js", "content.js"]
       });
       return await chrome.tabs.sendMessage(tab.id, payload);
     } catch {

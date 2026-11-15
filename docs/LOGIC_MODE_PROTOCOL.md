@@ -1,15 +1,16 @@
 # Logic Mode protocol
 
 This reference describes the assistant response markers used by Threadlamp
-1.9.8 beta 1. Selecting **Start logic** sends the operating instructions to the
+1.16.0 beta 1. Selecting **Start logic** sends the operating instructions to the
 conversation automatically. No separate setup prompt or framework file is required.
 
 ## Activation and response format
 
 Markers apply while Logic Mode is active. A shutdown message ends marker output.
 Each response ends with one control marker on its own final line, outside code
-fences. No text follows it. An input request also has a brief line immediately
-before its control marker.
+fences. No text follows it. Immediately before it, include a single SUMMARY line
+of at most 600 characters, with no brackets, line breaks, secrets or unnecessary
+personal details. An input request places BRIEF before SUMMARY.
 
 | Marker | State |
 | --- | --- |
@@ -18,11 +19,15 @@ before its control marker.
 | `[[LOGIC:IDLE]]` | The current cycle is complete; sleep until a heartbeat or new input. |
 | `[[LOGIC:USER_INPUT]]` | A human decision, information, or action is needed. |
 
+SUMMARY is dashboard text, not a control flag. Threadlamp reads it locally without
+a provider call. A missing or invalid summary does not change the ending flag.
+
 An input request has this form:
 
 ```text
 Which output format should I use?
 [[LOGIC:BRIEF: Choose the output format.]]
+[[LOGIC:SUMMARY: Work is ready to export; an output format is needed.]]
 [[LOGIC:USER_INPUT]]
 ```
 

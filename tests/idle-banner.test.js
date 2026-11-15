@@ -67,8 +67,8 @@ async function runTests() {
   shadow.querySelector(".stop").handlers.click();
   assert.equal(f.api.state.running, false);
   assert.equal(f.api.state.mode, "idle");
-  assert.equal(f.api.getOverlayForTest(), null);
-  assert.equal(f.api.getQueuedPromptForTest(), null);
+  assert.ok(f.api.getOverlayForTest(), "retain the saved queue for review after Stop");
+  assert.equal(f.api.getQueuedPromptForTest().text, "Do not send after Stop");
   assert.deepEqual(f.sends, [], "Stop on an idle cycle only closes local controls");
 
   f = await idle();

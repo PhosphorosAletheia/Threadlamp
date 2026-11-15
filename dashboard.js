@@ -23,6 +23,7 @@
   let approvalMessage = "", lastSettings = 0;
   let cardsFingerprint = "", eventsFingerprint = "";
   let broadcastRecipients = [], broadcastAttempted = false;
+  let editorEpoch = 0;
   const drafts = new Map();
   const panels = new Map();
   const priority = agent => !agent.online ? 5 : agent.error ? 0 : agent.logicPhase === "waiting_user" ? 1
@@ -57,7 +58,7 @@
     if (agent.running) return agent.mode === "loop" ? "Loop running" : "Logic running";
     return "Stopped / idle";
   }
-  function badge(agent) { return !agent.online ? "offline" : agent.error ? "error" : agent.logicPhase === "waiting_user" ? "waiting" : ""; }
+  function badge(agent) { return !agent.online ? "offline" : agent.error ? "error" : agent.paused ? "paused" : agent.logicPhase === "waiting_user" ? "waiting" : agent.running ? "running" : "stopped"; }
   function matches(agent) {
     if ($("hide-unavailable").checked && !agent.online) return false;
     const query = $("search").value.toLowerCase();
@@ -132,6 +133,7 @@
   function selectAgent(agent, { navigate = true } = {}) {
     agent = agents.find(current => key(current) === key(agent)) || agent;
     if (selectedKey === key(agent)) { if (navigate) showWorkspace(); return; }
+    editorEpoch += 1;
     selectedKey = key(agent); inspectedKey = ""; schedule = connection = null; lastInspection = 0;
     $("hb-status").textContent = $("server-status").textContent = agent.online ? "Loading…" : "This agent is offline.";
     $("uncertain").hidden = true;
@@ -158,7 +160,7 @@
     $("agent-count").textContent = `${agent.count || 0} / ${agent.limit || 0} messages`;
     $("agent-detail").textContent = agent.detail || "Ready.";
     const summary = agent.summary, last = summary?.last;
-    $("agent-summary").textContent = last?.text || "No summary yet. Enable summaries in Settings.";
+    $("agent-summary").textContent = last?.text || "No summary yet. Start Logic Mode with the updated SUMMARY instructions.";
     $("agent-summary-meta").textContent = last ? `Completed ${time(last.completedAt)} · ${last.model}${last.flag ? ` · ${last.flag.toUpperCase()}` : ""}` : "";
     $("agent-summary-status").textContent = summary?.status === "pending"
       ? "Summarizing latest output…" + (last ? " Previous summary shown above." : "")
@@ -385,6 +387,47 @@
       await refresh(); renderAgents(); renderDetail();
     }
   });
+  // An answer must still belong to the same editor session when it arrives.
+  // Input events also catch edits that return to the original text.
+  for (const field of document.querySelectorAll("textarea")) {
+    let revision = 0, pending = false, undo = null;
+    const row = el("div", undefined, "rewrite-controls");
+    const button = el("button", "Rewrite for agent", "quiet"), revert = el("button", "Undo rewrite", "quiet");
+    const status = el("span", "", "small muted"); status.setAttribute("role", "status");
+    button.type = revert.type = "button"; revert.hidden = true;
+    button.dataset.rewriteFor = field.id;
+    button.title = "Send only this draft to OpenRouter. Review the result before sending.";
+    row.append(button, revert, status);
+    if (field.id === "queued") field.parentElement.querySelector(".editor-footer").after(row);
+    else field.after(row);
+    field.addEventListener("input", () => {revision += 1; undo = null; revert.hidden = true; status.textContent = "";});
+    button.addEventListener("click", async () => {
+      if (pending || busy || field.disabled || field.readOnly || !field.value.trim()) return;
+      const original = field.value, generation = editorEpoch, version = revision, owner = selectedKey;
+      pending = true; button.disabled = true; status.textContent = "Rewriting…";
+      try {
+        const result = await request("SUM_REWRITE", {text:original, limit:field.maxLength});
+        if (generation !== editorEpoch || version !== revision || owner !== selectedKey || field.value !== original || field.readOnly || field.disabled) {
+          status.textContent = "Draft or selection changed; rewrite was not applied."; return;
+        }
+        if (typeof result.text !== "string" || !result.text.trim() || result.text.length > field.maxLength) throw new Error("The rewrite was invalid. Your draft was preserved.");
+        field.value = result.text; field.dispatchEvent(new Event("input", {bubbles:true}));
+        undo = {original, text:result.text, owner, generation}; revert.hidden = false;
+        status.textContent = "Rewritten. Review before sending.";
+      } catch (error) {status.textContent = error.message;}
+      finally {pending = false; button.disabled = false;}
+    });
+    revert.addEventListener("click", () => {
+      if (!undo || undo.owner !== selectedKey || undo.generation !== editorEpoch || field.value !== undo.text || busy || field.readOnly) return;
+      field.value = undo.original; field.dispatchEvent(new Event("input", {bubbles:true}));
+      status.textContent = "Original draft restored.";
+    });
+  }
+  for (const id of ["broadcast-open", "broadcast-new", "broadcast-submit"]) {
+    $(id)?.addEventListener("click", () => {editorEpoch += 1;});
+  }
+  $("broadcast-dialog").addEventListener("close", () => {editorEpoch += 1;});
+  $("broadcast-form").addEventListener("submit", () => {editorEpoch += 1;});
   for (const form of document.querySelectorAll("#detail form")) {
     form.addEventListener("submit", event => event.preventDefault());
     form.addEventListener("input", () => {
@@ -400,6 +443,7 @@
     button.type = "button";
     button.addEventListener("click", async () => {
       const agent = selected(); if (!agent) return;
+      editorEpoch += 1;
       const action = button.dataset.action, form = ["approve", "cancel_queue"].includes(action) ? null : button.closest("form");
       const draft = form && formState()[form.id];
       const expected = draft?.target || target(agent);

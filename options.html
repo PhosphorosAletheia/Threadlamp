@@ -25,18 +25,18 @@ SPDX-License-Identifier: MPL-2.0 -->
       </header>
 
       <section class="card" aria-labelledby="summary-heading">
-        <h2 id="summary-heading">Last output summaries</h2>
-        <p>Send each completed Logic Mode response to OpenRouter and its selected free-model provider for a short dashboard summary. Uses <strong>openrouter/free</strong>.</p>
+        <h2 id="summary-heading">Draft rewriting &amp; local summaries</h2>
+        <p>Dashboard summaries are read directly from Logic SUMMARY tags, without an external request. Rewrite buttons send only the draft you choose to OpenRouter using <strong>openrouter/free</strong>.</p>
         <form id="summary-controls">
-          <label class="check-row" for="summary-enabled"><input id="summary-enabled" type="checkbox"><span>Enable summaries</span></label>
+          <label class="check-row" for="summary-enabled"><input id="summary-enabled" type="checkbox"><span>Enable draft rewriting</span></label>
           <div class="field">
             <label for="summary-key">OpenRouter API key</label>
             <input id="summary-key" type="password" autocomplete="new-password" maxlength="512" placeholder="Enter API key locally">
             <small id="summary-key-state">No API key saved.</small>
           </div>
-          <p>The key is stored in this Chrome profile and excluded from settings backups. Only the current response is sent when enabled; provider data policies apply. Free-model availability and rate limits may delay or prevent summaries.</p>
-          <div class="primary-actions"><button type="submit" class="primary">Save summary settings</button><button id="summary-forget" type="button" class="secondary">Forget API key</button><button id="summary-clear" type="button" class="secondary">Clear saved summaries</button></div>
-          <p id="summary-status" role="status">Loading summary settings…</p>
+          <p>The key is stored in this Chrome profile and excluded from settings backups. A draft is sent only when you click Rewrite; provider data policies apply. Review the rewrite before sending. Free-model availability and rate limits may delay or prevent rewrites.</p>
+          <div class="primary-actions"><button type="submit" class="primary">Save rewrite settings</button><button id="summary-forget" type="button" class="secondary">Forget API key</button><button id="summary-clear" type="button" class="secondary">Clear saved summaries</button></div>
+          <p id="summary-status" role="status">Loading rewrite settings…</p>
         </form>
       </section>
 

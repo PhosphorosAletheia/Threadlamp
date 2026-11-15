@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.16.0 beta 1
+
+- Read dashboard summaries from a 600-character `LOGIC:SUMMARY` line before the final control flag; completed responses no longer trigger OpenRouter requests.
+- Add explicit Rewrite and Undo controls to dashboard message editors using the existing OpenRouter free router settings. Protect edited drafts and changed agent selections from late results.
+- Color agent bullets green for running, yellow for input, orange for errors, red for stopped, blue for paused and gray for unavailable.
+- Save queued messages across reloads and browser restarts, transfer them only through verified project handoffs, and persist dequeue before Send to prevent replay after uncertain delivery. Stop preserves the queue; Remove and Clear queue discard entries.
+- Record rewrite failure metadata without draft text. Reload the extension and chat tabs when safe, restart the LAN helper, and start Logic Mode with the updated instructions in existing chats. Older versions did not persist queues: preserve any pending entries before this first upgrade.
+
 ## 1.15.2 beta 1
 
 - Share a persistent summary cooldown across agents after OpenRouter rate limits.

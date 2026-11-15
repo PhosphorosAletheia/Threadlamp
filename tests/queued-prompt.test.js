@@ -206,7 +206,7 @@ async function decoratedQueueTests() {
     await f.run();
     if (change === "lock") assert.deepEqual(f.sends, [combined("Configured followup", "One-time instructions")]);
     else assert.deepEqual(f.sends, [], change);
-    if (["navigate", "manual"].includes(change)) assert.equal(f.api.getQueuedPromptForTest().text, "One-time instructions");
+    if (["navigate", "manual", "stop"].includes(change)) assert.equal(f.api.getQueuedPromptForTest().text, "One-time instructions");
     else if (change === "lock") assert.equal(f.api.getQueuedPromptForTest().text, "Later entry");
     else assert.equal(f.api.getQueuedPromptForTest(), null);
   }

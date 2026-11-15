@@ -6,7 +6,7 @@ A Chrome extension from [Phosphoros Research](https://phosphoros-research.pages.
 Threadlamp brings follow-up controls, a prompt queue, scheduled check-ins, and a
 dashboard for your open ChatGPT conversations into one local workspace.
 
-**Version 1.15.2 beta 1.** Threadlamp uses your existing ChatGPT session and plan
+**Version 1.16.0 beta 1.** Threadlamp uses your existing ChatGPT session and plan
 allowance. No OpenAI API key is required. It is an independent project and is
 not affiliated with, endorsed by, or sponsored by OpenAI.
 
@@ -18,7 +18,9 @@ not affiliated with, endorsed by, or sponsored by OpenAI.
 - View conversation status and control each chat from the dashboard.
 - Optionally use the full dashboard across your LAN with an authenticated HTTPS helper.
   See [LAN dashboard setup](LAN_DASHBOARD.md).
-- Optionally summarize each finished Logic Mode response with OpenRouter’s free router.
+- Read dashboard summaries directly from Logic Mode responses, without provider requests.
+- Rewrite a dashboard draft on demand with OpenRouter’s free router, then review or undo it.
+- Keep queued messages across tab, extension, and browser reloads.
 - Schedule per-conversation check-ins, called heartbeats.
 - Optionally connect Home Assistant notifications or a local project server.
 

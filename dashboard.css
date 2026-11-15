@@ -61,8 +61,12 @@ h4 { font-size: 13px; font-weight: 650; }
 .fleet-bar button[aria-pressed=true] { background: #202a26; color: #e5f3ed; }
 .version { margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
 .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
-.status-dot.waiting { background: #f2c078; }
-.status-dot.error { background: var(--error); }
+.status-dot.waiting { background: #eab308; }
+.status-dot.error { background: #f97316; }
+.status-dot.running { background: #22c55e; }
+.status-dot.stopped { background: #ef4444; }
+.status-dot.paused { background: #3b82f6; }
+.rewrite-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 10px; }
 .status-dot.offline { background: #999; }
 .count-badge { display: inline-flex; justify-content: center; align-items: center; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 5px; background: #292929; color: #ddd; font-size: 10px; font-variant-numeric: tabular-nums; }
 .count-badge.alert, #activity-count { background: #3c2c16; color: #f2c078; }
@@ -124,7 +128,7 @@ h4 { font-size: 13px; font-weight: 650; }
 .panel-heading p { margin-top: 4px; font-size: 12px; }
 .panel-symbol { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 11px; color: #aaa; font-size: 25px; }
 .context-strip { display: flex; align-items: center; gap: 9px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 7px; background: #141414; color: var(--muted); font-size: 12px; margin-bottom: 20px; overflow-wrap: anywhere; white-space: pre-wrap; }
-#queued { min-height: 150px; border-radius: 8px 8px 0 0; border-bottom: 0; }
+#queued { min-height: 110px; border-radius: 8px 8px 0 0; border-bottom: 0; }
 .editor-footer { display: flex; justify-content: space-between; gap: 8px; padding: 9px 12px; border: 1px solid #454545; border-top: 1px solid #303030; border-radius: 0 0 8px 8px; color: var(--muted); font-size: 10px; background: #141414; }
 .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 .actions .primary { min-width: 135px; }

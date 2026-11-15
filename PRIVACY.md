@@ -1,7 +1,7 @@
 # Threadlamp privacy notice
 
 Publisher: [Phosphoros Research](https://phosphoros-research.pages.dev/).
-Applies to Threadlamp 1.15.2 beta 1. Updated November 15, 2026.
+Applies to Threadlamp 1.16.0 beta 1. Updated November 15, 2026.
 
 ## Data handled
 
@@ -15,8 +15,8 @@ There is no extension-operated publisher telemetry, advertising or analytics ser
 | Loop prompts, limits and preferences | Saved in local extension storage. |
 | Chat URLs/titles, project labels, status and short input-request summaries | Used in the dashboard; bounded agent/event records are stored locally. |
 | Scheduled prompts, times, timezone and dispatch state | Stored locally for heartbeats across background-worker restarts. |
-| Pending prompt queues and drafts | Held in the tab; a pending rollover may temporarily carry queue data in extension session storage. |
-| OpenRouter API key and output summaries | If enabled, the key and up to 100 conversation records are stored locally in trusted extension storage. Each record retains the latest summary, model, ending tag, timestamps/status and up to 30 completion hashes. Raw outputs are held transiently for a request, not persisted. A shared rate-limit cooldown stores only its expiry and backoff count. |
+| Pending prompt queues and drafts | Added queue text is stored in trusted local extension storage until consumed or cleared. Conversation/project identities and revision records remain to reject stale writes. Handoff receipts can also carry queues in session storage. Unsubmitted editor drafts remain in the dashboard/tab. |
+| OpenRouter API key and local output summaries | The optional rewrite key is stored locally. Up to 100 conversation records retain the latest locally extracted SUMMARY, source, ending tag, timestamps/status and up to 30 completion hashes. Full outputs are not persisted or sent to a provider. Rewrite drafts/results are transient and are not stored by the rewrite service. A shared rate-limit cooldown stores its expiry and backoff count. |
 | Home Assistant address, notification action and access token | Stored locally only if configured; used to contact that service. |
 | Project server bindings, credentials, setup state and event identifiers | Stored locally if configured; used for pairing and routed event delivery. |
 | Logic reconnection checkpoints | Tab/conversation identity, follow-up settings and count, and a hash of the last user message ID and text are held in extension session storage. No transcript is saved; up to 100 recent checkpoints are retained and expire for recovery after ten minutes without updates. |
@@ -32,12 +32,12 @@ these bounds are counts, not automatic time-based deletion periods.
 - **ChatGPT:** requested prompts, follow-ups, queued instructions, replies and
   setup messages are submitted through your signed-in ChatGPT page. OpenAI's
   applicable terms and privacy practices govern its processing.
-- **OpenRouter, if enabled:** the complete text of one finished Logic Mode assistant
-  response (through its ending tag) is sent to OpenRouter and a provider selected
-  by `openrouter/free`, along with summarization instructions. The API key is sent
-  to OpenRouter for authentication. Previous turns and user prompts are excluded.
-  OpenRouter and provider retention/training policies apply. This integration is
-  disabled by default and requires optional OpenRouter host access.
+- **OpenRouter, when you click Rewrite:** only the selected dashboard editor's draft
+  and rewriting instructions are sent to OpenRouter and a provider selected by
+  `openrouter/free`. The API key authenticates the request. Conversation responses,
+  summaries, other editors and other queued messages are not included. Provider
+  retention/training policies apply. Rewriting requires an enabled setting and
+  optional host access; existing OpenRouter settings are reused on upgrade.
 - **Home Assistant, if enabled:** your configured instance receives authentication
   and notification requests containing chat links, titles, brief requests, status
   or errors. Its mobile notification delivery may involve push service providers.
@@ -76,15 +76,15 @@ other data categories, including the OpenRouter key and summaries; see the user 
 | `scripting` | Reattach bundled page scripts to an eligible active chat when needed. |
 | `alarms` | Schedule heartbeat wakeups and reconnect an enabled LAN bridge. |
 | ChatGPT host access | Read page state and submit the requested chat controls. |
-| Optional HTTP/HTTPS hosts | Request user-selected Home Assistant site access, loopback access for project connections or the LAN helper, or OpenRouter access for output summaries. The declaration permits configurable hosts; access is requested at setup. |
+| Optional HTTP/HTTPS hosts | Request user-selected Home Assistant site access, loopback access for project connections or the LAN helper, or OpenRouter access for draft rewriting. The declaration permits configurable hosts; access is requested at setup. |
 
 ## Control and deletion
 
 Pause/stop automation and disable schedules to prevent future automatic work.
 Clear dashboard event history through its UI. Use **Forget settings** for Home
-Assistant and remove project connections when no longer needed. Disable output
-summaries and use **Forget API key** or **Clear saved summaries** in Settings to
-remove OpenRouter configuration or results. Dashboard event clearing does not
+Assistant and remove project connections when no longer needed. Disable draft
+rewriting and use **Forget API key** or **Clear saved summaries** in Settings to
+remove the OpenRouter key or local summary results. Use Remove or Clear queue in each chat to delete its saved queued text. Dashboard event clearing does not
 remove summary records. Revoke credentials
 at their originating services. Uninstall removes extension-managed local storage;
 delete downloaded backups and service-side messages/records separately.
@@ -108,9 +108,10 @@ See [LAN setup](LAN_DASHBOARD.md) for access and retention details.
 Diagnostic recording is enabled by default and can be disabled or cleared from
 Dashboard Settings. It stores only allowlisted metadata: versions, timestamps,
 tab IDs, anonymized project/chat references, automation states, error categories,
-extension code locations, counts, lengths, and boolean check results. Summary
-request metadata includes elapsed time, HTTP status, input length, and categorized
-errors; provider response bodies are excluded. It excludes
+extension code locations, counts, lengths, and boolean check results. Rewrite
+request metadata includes elapsed time, input length, cooldown and categorized
+errors; provider response bodies are excluded. Earlier summary-request metadata
+may remain until diagnostics are cleared or expire. It excludes
 prompt and response text, queued instructions, titles, raw project/chat IDs, full
 URLs, credentials, and arbitrary page or Console content. No diagnostic report is
 sent to an external analytics service.

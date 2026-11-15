@@ -72,7 +72,15 @@
   }
   // Internal worker calls use the sender already validated when the summary was
   // accepted. A tab may navigate while its provider request is outstanding.
-  globalThis.DiagnosticWorker = {request, recordSummary: (event, sender, instance) => {
+  globalThis.DiagnosticWorker = {request, recordRewrite: event => serialized(data => {
+    if (!data.enabled) return;
+    const item = {...schema.snapshot(event), at:Date.now(), tabId:0, workerVersion:version(), route:"other"};
+    data.events.push(item); data.events = data.events.slice(-400);
+    if (item.event === "rewrite_error") {
+      data.incidents.push({at:item.at, tabId:0, reason:item.reason, events:[item]});
+      data.incidents = data.incidents.slice(-20);
+    }
+  }), recordSummary: (event, sender, instance) => {
     if (!["summary_start", "summary_ready", "summary_error", "summary_skipped"].includes(event?.event)) return Promise.resolve();
     return record({event, instance}, sender, true);
   }};
