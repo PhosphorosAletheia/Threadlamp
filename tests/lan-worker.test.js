@@ -35,6 +35,11 @@ test("paired LAN worker revokes stale sockets and preserves dashboard identity c
   await socket.receive({type:"request",id:"repeat",request});assert.equal(executed,1,"receipt prevents duplicate dispatch");
   await socket.receive({type:"request",id:"settings",request:{type:"HA_GET_SETTINGS"}});
   assert.deepEqual(Object.keys(socket.sent.at(-1).response).sort(),["approvalMessage","connection","enabled"]);
+  assert.deepEqual(socket.sent[0].capabilities,["diagnostics-v1"]);
+  await socket.receive({type:"request",id:"diagnostics",request:{type:"DG_EXPORT"}});
+  assert.equal(socket.sent.at(-1).response.ok,true);
+  assert.equal(socket.sent.at(-1).response.report.schema,1);
+  assert.equal(executed,1,"diagnostic export does not invoke chat controls");
   // Hold initialization so a request cannot enter the command router before disabling.
   vm.runInContext("globalThis.previousInitialization = initializationPromise; initializationPromise = new Promise(resolve => globalThis.releaseInitialization = resolve)",h.context);
   request.commandId="lan-command-3";

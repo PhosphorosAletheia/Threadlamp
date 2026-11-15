@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.15.0 beta 1
+
+- Add local diagnostic events and error snapshots for handoffs, sends, reasoning
+  checks, chat identity changes, and reconnection. Reports contain metadata only;
+  prompts, replies, titles, URLs, and credentials are excluded.
+- Add dashboard Settings controls to download, disable, and clear diagnostics.
+- Let the paired LAN helper automatically save the latest diagnostic report in
+  its private setup directory, reducing manual Console checks.
+
 ## 1.14.5 beta 1
 
 - Clear restored destination drafts during a verified automatic new-chat handoff,

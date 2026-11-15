@@ -103,6 +103,47 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     rolloverRequestId: null
   };
 
+  const diagnosticContentVersion = typeof ThreadlampDiagnosticSchema === "undefined" ? "" : chrome.runtime.getManifest().version;
+  let diagnosticState = "";
+  function diagnosticSnapshot(extra = {}) {
+    const result = {contentVersion:diagnosticContentVersion, mode:state.mode, phase:state.logicPhase,
+      runId:state.runId, count:state.count, limit:state.limit, running:state.running, paused:state.paused};
+    try {
+      const composer = findComposer(), user = latestMessageSnapshot("user");
+      const draft = composerText(composer), sourceProject = draft.match(/Source project ID:\s*(g-p-[a-f0-9]{32})/i)?.[1];
+      const wrapper = user.element?.closest?.("[data-chatgpt-search-message-ids]");
+      let ids = wrapper?.getAttribute("data-chatgpt-search-message-ids");
+      try { ids = JSON.parse(ids); } catch { /* A plain UUID is also valid markup. */ }
+      ids = Array.isArray(ids) ? ids : ids ? [ids] : [];
+      const roles = wrapper ? [...wrapper.querySelectorAll("[data-message-author-role], [data-conversation-role], [data-user-message-bubble='true']")] : [];
+      Object.assign(result, {queueCount:queuedPrompts.length, hasComposer:!!composer, draftLength:draft.length,
+        draftLooksLikeHandoff:draft.startsWith("This chat is a continuation"),
+        draftHasQueuedInstructions:draft.includes("Additional instructions from the user for this round:"),
+        ...(sourceProject ? {draftSourceProjectMatches:sameRolloverProject(sourceProject, projectSegmentFromLocation())} : {}),
+        hasUser:!!user.element, hasAssistant:messageElements("assistant").length > 0, userLength:user.text.length,
+        userRenderedLength:(user.element?.innerText || "").length, generating:isGenerating(),
+        paragraphs:composer?.querySelectorAll("p").length || 0, breaks:composer?.querySelectorAll("br").length || 0,
+        hasLegacyId:!!(user.element?.getAttribute("data-message-id") || user.element?.closest?.("[data-message-id]") || user.element?.querySelector?.("[data-message-id]")),
+        hasSearchWrapper:!!wrapper, searchIdCount:ids.length,
+        wrapperTurns:roles.filter(n => !roles.some(other => other !== n && other.contains(n))).length,
+        singleSearchUUID:ids.length === 1 && typeof ids[0] === "string" && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(ids[0])});
+      const control = composer && findThinkingControl(composer);
+      if (control) result.highThinking = thinkingControlShowsHigh(control);
+    } catch { /* Partial structure is still useful; never interrupt automation. */ }
+    return ThreadlampDiagnosticSchema.snapshot({...result, ...extra});
+  }
+  function recordDiagnostic(event, extra = {}) {
+    if (typeof ThreadlampDiagnosticSchema === "undefined") return;
+    try {
+      const frames = event === "error" || event === "identity_rejected" ? String(new Error().stack || "").split("\n").flatMap(line => {
+        const match = line.match(/chrome-extension:\/\/[a-p]{32}\/(content\.js):(\d+):(\d+)/);
+        return match ? [{file:match[1], line:Number(match[2]), column:Number(match[3])}] : [];
+      }).slice(0,5) : undefined;
+      const request = {type:"DG_RECORD", instance:heartbeatInstanceId, event:diagnosticSnapshot({event, reason:"none", frames, ...extra})};
+      void chrome.runtime.sendMessage(request).catch(() => {});
+    } catch { /* A stale extension context cannot report; its version remains in earlier records. */ }
+  }
+
   let overlayHost = null;
   let terminalNotice = false;
   let reconnectAttempted = false;
@@ -310,7 +351,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       state.paused = false;
       setDetail("Connection lost. Waiting 30 seconds before one reload; no prompt will be resent…");
       state.paused = true; state.pausedDetail = state.detail;
-      state.logicPhase = "reconnecting"; updateOverlay();
+      state.logicPhase = "reconnecting"; recordDiagnostic("reconnect_start"); updateOverlay();
       const started = Date.now();
       while (Date.now() - started < 30000) {
         if (!state.running || state.runId !== runId) return null;
@@ -349,6 +390,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       reconnectToken = record.token; reconnectCheckpoint = record.settings;
       reconnectAttempted = Boolean(record.attempted);
       Object.assign(state, record.settings, { running: true, mode: "logic", logicPhase: "reconnecting", paused: false, error: false });
+      recordDiagnostic("reconnect_restored");
       delete state.userHash; delete state.verifiedUser;
       state.runId += 1;
       const runId = state.runId;
@@ -1682,6 +1724,7 @@ ${LOGIC_START_PROMPT}
   }
 
   async function startClaimedLogicRollover(pending) {
+    recordDiagnostic("handoff_claimed", {sourceProjectMatches:destinationMatchesProject(pending?.projectSegment)});
     const entryRunId = state.runId;
     const destinationUrl = window.location.href;
     const previousTitle = String(pending?.previousTitle || "").trim();
@@ -1725,11 +1768,13 @@ ${LOGIC_START_PROMPT}
       || findComposer() !== composer || composerText(composer) !== carriedDraft) {
       throw new Error("The new chat or its draft changed while verifying the handoff. The draft was preserved.");
     }
+    recordDiagnostic("handoff_verified", {sourceProjectMatches:true});
     if (carriedDraft) {
       if (!clearComposer(composer)) {
         throw new Error("The carried-over continuation draft could not be cleared safely.");
       }
     }
+    recordDiagnostic("draft_cleared");
 
     state.running = true;
     state.count = count;
@@ -1846,6 +1891,7 @@ ${LOGIC_START_PROMPT}
       setDetail(`Conversation limit reached. Preparing a new chat in the same project for “${previousTitle}”…`);
 
       queuedPromptForLocation();
+      recordDiagnostic("handoff_prepare");
       const prepared = await chrome.runtime.sendMessage({
         type: "LOGIC_ROLLOVER_PREPARE",
         projectSegment,
@@ -2196,7 +2242,7 @@ ${LOGIC_START_PROMPT}
     if (beforeMenus.length || control.getAttribute("aria-expanded") === "true") {
       throw new Error("Close the open menu before retrying the new chat. High thinking could not be verified.");
     }
-    if (thinkingControlShowsHigh(control)) return true;
+    if (thinkingControlShowsHigh(control)) { recordDiagnostic("thinking_verified", {highThinking:true}); return true; }
 
     setDetail("Selecting High thinking for the new chat…");
     control.click();
@@ -2278,10 +2324,16 @@ ${LOGIC_START_PROMPT}
       if (!persisted) throw new Error("The thinking control did not retain High after closing its menu. The prompt was not sent.");
     }
     assertUnchanged();
+    recordDiagnostic("thinking_verified", {highThinking:true});
     return true;
   }
 
   function setDetail(detail, error = false, retainNotice = false) {
+    const diagnosticKey = [state.mode, state.logicPhase, state.running, state.paused, error].join(":");
+    if (error || diagnosticKey !== diagnosticState) {
+      diagnosticState = diagnosticKey;
+      recordDiagnostic(error ? "error" : "state", {reason:typeof ThreadlampDiagnosticSchema === "undefined" ? "other" : error ? ThreadlampDiagnosticSchema.reason(detail) : "none"});
+    }
     terminalNotice = !state.running && (error || retainNotice);
     if (!state.running && reconnectToken) void reconnectMessage("LR_CLEAR").catch(() => {});
     if (state.mode === "logic" && state.paused) {
@@ -2781,6 +2833,7 @@ ${LOGIC_START_PROMPT}
         || snapshotChanged(latestMessageSnapshot("user"), userBefore) || isGenerating()) {
         throw new Error("The chat or draft changed while preparing the quick prompt. No message was sent.");
       }
+      recordDiagnostic("send_attempt", {expectedLength:prompt.length, draftMatchesExpected:composerDraftMatches(findComposer(), prompt)});
       sendButton.click();
 
       const accepted = await waitForCondition(
@@ -2851,10 +2904,12 @@ ${LOGIC_START_PROMPT}
       if (matchesSubmission(user) && (!submitted.verifiedUserId || messageSnapshotId(user) === submitted.verifiedUserId)) {
         for (const item of queuedPrompts) { if (item.url === owner.url) item.url = window.location.href; }
         owner.identity = chatIdentity(); owner.url = window.location.href;
+        recordDiagnostic("identity_adopted");
         return;
       }
       await sleep(POLL_MS);
     }
+    recordDiagnostic("identity_rejected", {reason:"chat_changed"});
     throw new Error("The chat changed from the conversation that started automation. Automatic sending stopped; inspect the chat before resuming.");
   }
 
@@ -3097,6 +3152,7 @@ ${LOGIC_START_PROMPT}
         throw new Error("ChatGPT did not accept text in the message box.");
       }
 
+      recordDiagnostic("prompt_written", {expectedLength:text.length, draftMatchesExpected:composerDraftMatches(composer, text)});
       const enabled = await waitWhileCurrent(
         runId,
         () => buttonIsEnabled(findSendButton()),
@@ -3130,6 +3186,7 @@ ${LOGIC_START_PROMPT}
       }
       serverSendAttempted = Boolean(serverLease);
       if (runOwnership?.runId === runId) runOwnership.submitted = { text, before: serverUser, deadline: Date.now() + SEND_ENABLE_TIMEOUT_MS };
+      recordDiagnostic("send_attempt", {expectedLength:text.length, draftMatchesExpected:composerDraftMatches(findComposer(), text)});
       sendButton.click();
 
       const accepted = await waitWhileCurrent(
@@ -3143,6 +3200,7 @@ ${LOGIC_START_PROMPT}
         throw new Error("ChatGPT did not accept the message.");
       }
 
+      recordDiagnostic("send_observed");
       if (serverLease) {
         serverDeliveryConfirmed = await waitWhileCurrent(runId, () => {
           const current = latestMessageSnapshot("user");
@@ -3643,6 +3701,7 @@ ${LOGIC_START_PROMPT}
           if (!state.running || state.runId !== runId) return;
           const receipt = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_COMPLETE", requestId: startupFailureContext.failureId });
           if (!receipt?.ok) throw new Error(receipt?.error || "The continuation was sent, but the handoff receipt could not be confirmed. Inspect the new chat.");
+          recordDiagnostic("handoff_complete");
           if (receipt.heartbeatSchedule) heartbeatSchedule = receipt.heartbeatSchedule;
           if (receipt.serverLinkTransfer) void bindServerDestination(runId, receipt.serverLinkTransfer, startPrompt);
         }
@@ -4287,4 +4346,5 @@ ${LOGIC_START_PROMPT}
   window.setInterval(updateQuickActions, QUICK_ACTION_REFRESH_MS);
   window.setInterval(publishDashboardStatus, 1000);
   window.addEventListener("resize", updateQuickActions, { passive: true });
+  recordDiagnostic("loaded");
 })();

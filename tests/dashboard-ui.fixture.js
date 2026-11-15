@@ -34,6 +34,8 @@ function mock() {
   let inspectedSchedule = configuration;
   globalThis.chrome = {
     runtime: { openOptionsPage: async () => {}, sendMessage: async request => {
+      if (request.type === "DG_GET" || request.type === "DG_SET" || request.type === "DG_CLEAR") return {ok:true,enabled:true,eventCount:12,incidentCount:1};
+      if (request.type === "DG_EXPORT") return {ok:true,report:{schema:1,events:[],incidents:[]}};
       if (request.type === "DB_LIST") return structuredClone({ ok: true, agents, events, version: "1.12.1" });
       if (request.type === "DB_INSPECT") return { ok: true, schedule: inspectedSchedule, connection: null, defaultPrompt: "Do the scheduled work." };
       if (request.type === "ALERT_GET_SETTINGS") return { soundEnabled: true };

@@ -9,7 +9,7 @@
     "server_setup", "server_recover", "server_assign", "server_enable", "server_disable", "server_resolve"]);
   const types = new Set(["DB_LIST", "DB_INSPECT", "DB_DISMISS", "DB_CLEAR_HISTORY", "DB_COMMAND",
     "ALERT_GET_SETTINGS", "ALERT_SET_SETTINGS", "ALERT_TEST_SOUND", "HA_GET_SETTINGS",
-    "LAN_OPEN_CHAT", "LAN_OPEN_OPTIONS", "LAN_LOOPBACK_PERMISSION"]);
+    "LAN_OPEN_CHAT", "LAN_OPEN_OPTIONS", "LAN_LOOPBACK_PERMISSION", "DG_GET", "DG_SET", "DG_CLEAR", "DG_EXPORT"]);
   function allowed(request) {
     return Boolean(request && typeof request === "object" && !Array.isArray(request) && types.has(request.type)
       && (request.type !== "DB_COMMAND" || actions.has(request.action)));

@@ -1,7 +1,7 @@
 # Threadlamp privacy notice
 
 Publisher: [Phosphoros Research](https://phosphoros-research.pages.dev/).
-Applies to Threadlamp 1.14.5 beta 1. Updated November 14, 2026.
+Applies to Threadlamp 1.15.0 beta 1. Updated November 14, 2026.
 
 ## Data handled
 
@@ -102,3 +102,23 @@ and TLS material in a private host directory; sessions and requests stay in
 memory. It does not log or persist message bodies. The extension stores its
 pairing token in local extension storage, excluded from settings exports.
 See [LAN setup](LAN_DASHBOARD.md) for access and retention details.
+
+## Local diagnostics
+
+Diagnostic recording is enabled by default and can be disabled or cleared from
+Dashboard Settings. It stores only allowlisted metadata: versions, timestamps,
+tab IDs, anonymized project/chat references, automation states, error categories,
+extension code locations, counts, lengths, and boolean check results. It excludes
+prompt and response text, queued instructions, titles, raw project/chat IDs, full
+URLs, credentials, and arbitrary page or Console content. No diagnostic report is
+sent to an external analytics service.
+
+The extension retains at most 400 recent events and 20 error snapshots of up to
+40 events each; entries older than seven days are pruned on access. If the optional
+LAN helper is paired and running, it receives a sanitized report over its existing
+authenticated loopback connection every 30 seconds and overwrites one private
+`diagnostics/latest.json` file inside its setup directory. This file can outlive
+browser disconnection; clear it through the dashboard while connected or delete
+that file locally. Downloaded reports remain wherever you save them. Anyone who
+can read a report can see the timing and technical state of your automation, even
+though the conversation text and raw identifiers are omitted.

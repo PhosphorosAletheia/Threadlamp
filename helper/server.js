@@ -5,6 +5,7 @@ const http = require("node:http"), https = require("node:https"), crypto = requi
 const fs = require("node:fs"), path = require("node:path");
 const {WebSocketServer, WebSocket} = require("ws");
 const protocol = require("../lan-protocol.js");
+const {saveReport} = require("./diagnostics.js");
 const root = path.resolve(__dirname, "..");
 const hash = value => crypto.createHash("sha256").update(String(value)).digest("hex");
 const equal = (a, b) => crypto.timingSafeEqual(Buffer.from(hash(a), "hex"), Buffer.from(hash(b), "hex"));
@@ -25,12 +26,12 @@ function installableHtml(html) {
     .replace("</head>", '<link rel="manifest" href="/app.webmanifest"><meta name="theme-color" content="#090506"><link rel="stylesheet" href="/install.css"><script defer src="/install.js"></script></head>');
 }
 const cookieName = "__Host-threadlamp";
-function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000} = {}) {
+function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000, diagnosticsDirectory = null, diagnosticsInterval = 30000} = {}) {
   const origin = new URL(config.origin);
   if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) throw new Error("A plain HTTPS dashboard origin is required.");
   if (!/^[A-Za-z0-9_-]{43}$/.test(config.bridgeToken) || !/^[a-f0-9]{64}$/.test(config.passwordHash)) throw new Error("Invalid helper credentials.");
   const sessions = new Map(), attempts = new Map(), pending = new Map();
-  let peer = null, peerSeen = 0, closing = false;
+  let peer = null, peerSeen = 0, closing = false, diagnosticPeer = null, diagnosticPoll = null, diagnosticBusy = false, diagnosticWarning = false, diagnosticTask = Promise.resolve();
   const peers = new Set();
   const headers = {
     "Cache-Control":"no-store", "X-Content-Type-Options":"nosniff", "Referrer-Policy":"no-referrer",
@@ -74,6 +75,21 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000} = {}
       try { connection.send(JSON.stringify({type:"request",id,request})); }
       catch { clearTimeout(timer); pending.delete(id); resolve({ok:false,uncertain:true,error:"Bridge delivery is uncertain. Inspect the agent before retrying."}); }
     });
+  }
+  async function mirrorDiagnostics() {
+    if (!diagnosticsDirectory || !diagnosticPeer || diagnosticPeer !== peer || diagnosticBusy || closing) return;
+    const connection = peer;
+    diagnosticBusy = true;
+    try {
+      const response = await rpc({type:"DG_EXPORT"});
+      if (response?.ok && response.report && connection === peer && !closing) {
+        await saveReport(diagnosticsDirectory, response.report); diagnosticWarning = false;
+      }
+    } catch {
+      if (!diagnosticWarning) console.warn("Threadlamp could not save local diagnostics. Check the diagnostic directory permissions.");
+      diagnosticWarning = true;
+    }
+    finally { diagnosticBusy = false; }
   }
   const web = https.createServer({...tls, minVersion:"TLSv1.2"}, async (req, res) => {
     res.on("error", () => {});
@@ -154,7 +170,15 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000} = {}
         if (message.type !== "auth" || message.protocol !== protocol.protocol || typeof message.token !== "string"
           || !equal(message.token,config.bridgeToken) || peer) return ws.close();
         clearTimeout(authTimer); authenticated = true; peer = ws; peerSeen = Date.now();
-        ws.send(JSON.stringify({type:"ready",protocol:protocol.protocol})); return;
+        ws.send(JSON.stringify({type:"ready",protocol:protocol.protocol}));
+        // Older paired extensions do not advertise diagnostics and are never polled.
+        if (diagnosticsDirectory && Array.isArray(message.capabilities) && message.capabilities.includes("diagnostics-v1")) {
+          diagnosticPeer = ws;
+          clearInterval(diagnosticPoll);
+          diagnosticPoll = setInterval(() => { if (!diagnosticBusy) diagnosticTask = mirrorDiagnostics(); }, diagnosticsInterval); diagnosticPoll.unref();
+          diagnosticTask = mirrorDiagnostics();
+        }
+        return;
       }
       if (peer !== ws) return ws.terminate();
       peerSeen = Date.now();
@@ -168,7 +192,7 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000} = {}
     });
     ws.on("close", () => {
       clearTimeout(authTimer); peers.delete(ws);
-      if (peer === ws) { peer = null; rejectPending(); }
+      if (peer === ws) { peer = null; diagnosticPeer = null; clearInterval(diagnosticPoll); rejectPending(); }
     });
   });
   const reap = setInterval(() => {
@@ -183,11 +207,12 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000} = {}
     server.once("error",failed); server.once("listening",ready); server.listen(port,host);
   });
   async function close() {
-    closing = true; clearInterval(reap); rejectPending();
+    closing = true; clearInterval(reap); clearInterval(diagnosticPoll); rejectPending();
     for (const ws of peers) ws.terminate();
     await Promise.all([web,bridge].map(server => new Promise(resolve => {
       server.close(resolve); server.closeAllConnections?.();
     })));
+    await diagnosticTask;
     wss.close(); sessions.clear();
   }
   return {web,bridge,close, async start() {

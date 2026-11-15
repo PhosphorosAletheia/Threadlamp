@@ -246,3 +246,38 @@ Use the optional [LAN dashboard helper](LAN_DASHBOARD.md) to queue messages,
 broadcast, control Logic Mode, and manage heartbeats from another device. Setup
 requires the source package and a local Node.js helper. LAN access is off until
 you pair it in extension settings.
+
+## Diagnostics and error reports
+
+Local diagnostics are on by default. Threadlamp records its version, content-script
+version, event times, anonymized project/chat references, tab identifiers, state
+changes, and the checks around automatic sends and handoffs. Error snapshots keep
+recent events from that tab, including draft/message lengths, structural checks,
+High-thinking checks, and extension code locations where an error was reported.
+Message text, queued instructions, replies, titles, full URLs, and credentials are
+not included. References let us correlate events without exposing project or chat
+IDs; they change when diagnostics are cleared.
+
+Open **Dashboard → Settings → Diagnostics** to download a JSON report, turn
+recording off, or clear saved diagnostics. Recording keeps at most 400 recent
+events and 20 error snapshots, with up to 40 events in each snapshot. Entries older
+than seven days are pruned when the recorder is accessed. Repeated events are
+limited to keep logging lightweight. Turning recording off retains existing
+reports until you clear them. Clearing diagnostics does not clear your agent
+history, queues, schedules, or settings.
+
+The paired LAN helper saves a private host file automatically every 30 seconds
+while connected: `diagnostics/latest.json` inside its setup directory. With the
+default setup, that is `~/.config/threadlamp-lan/diagnostics/latest.json`. Restart
+the updated helper once to enable this feature. It overwrites that one file rather
+than accumulating logs. After disconnecting, the file remains the last available
+snapshot; its `generatedAt` time shows its age. A clear operation reaches the file
+on the next successful sync; existing downloads are never deleted automatically.
+
+When reporting an error, leave the affected chat unchanged and identify the agent.
+If the local helper is running, the host report may already have the evidence we
+need. Otherwise, download the report and attach it. Recording cannot reconstruct
+an earlier failure from before this version was loaded, and an invalidated
+extension context cannot send new events until the tab is reloaded. Earlier
+recorded events remain available. Reports help diagnose a failure; they do not
+prove that a remote task completed or that a message was delivered.

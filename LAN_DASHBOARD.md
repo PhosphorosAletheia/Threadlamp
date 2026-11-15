@@ -137,3 +137,17 @@ to store its normal settings and dashboard history.
 The helper accepts an explicit set of dashboard operations. Existing conversation,
 page-instance, revision, and command-receipt checks still apply. It cannot serve
 arbitrary source/configuration files or proxy arbitrary extension messages.
+
+## Automatic diagnostic file
+
+After updating to a version with diagnostics, restart the helper and reload the
+updated extension when your agents can safely be reloaded. The helper automatically
+saves a sanitized report every 30 seconds while the paired extension is connected.
+The file is `diagnostics/latest.json` under your helper setup directory (the
+`--dir` directory, or `~/.config/threadlamp-lan` by default). Its directory is
+owner-only and its file permissions are owner read/write. It is not served as a
+public web file. Older extensions without diagnostics are not polled for reports.
+
+Use **Settings → Diagnostics** in either dashboard to download a report, disable
+recording, or clear it. This does not send messages or restart agents. See the
+[user guide](USER_GUIDE.md#diagnostics-and-error-reports) for retention and privacy.

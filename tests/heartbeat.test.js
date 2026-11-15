@@ -35,7 +35,7 @@ async function harness(saved = {}, options = {}) {
     console, URL, Intl, TextEncoder, Date: Clock, crypto: webcrypto, setTimeout, clearTimeout, setInterval, clearInterval,
     fetch: async (...args) => { fetchCalls.push(args); return { ok: true, headers: { get: () => "application/json" }, json: async () => ({}) }; },
     chrome: {
-      runtime: {
+      runtime: { getManifest: () => ({version:"1.15.0"}),
         id: "test-extension", getURL: s => `chrome-extension://test-extension/${s}`, getContexts: async () => [],
         onMessage: { addListener: fn => listeners.message.push(fn) },
         onStartup: { addListener: fn => listeners.startup.push(fn) }, onInstalled: { addListener: fn => listeners.installed.push(fn) }

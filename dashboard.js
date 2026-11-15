@@ -512,6 +512,37 @@
     try { await request("DB_CLEAR_HISTORY"); await refresh(); notice("Activity history cleared. Live agent statuses remain available."); }
     catch (error) { notice(error.message, true); }
   });
+  async function diagnosticSettings() {
+    try {
+      const result = await request("DG_GET");
+      $("diagnostics-enabled").checked = result.enabled;
+      $("diagnostics-enabled").disabled = false;
+      $("diagnostics-status").textContent = `${result.incidentCount} error snapshots · ${result.eventCount} recent events`;
+    } catch { $("diagnostics-status").textContent = "Diagnostics unavailable. Reload the updated extension."; }
+  }
+  $("preferences-toggle").addEventListener("click", diagnosticSettings);
+  $("diagnostics-enabled").addEventListener("change", async () => {
+    $("diagnostics-enabled").disabled = true;
+    try { await request("DG_SET", {enabled:$("diagnostics-enabled").checked}); }
+    catch (error) { notice(error.message, true); }
+    await diagnosticSettings();
+  });
+  $("diagnostics-export").addEventListener("click", async () => {
+    try {
+      const result = await request("DG_EXPORT");
+      const url = URL.createObjectURL(new Blob([JSON.stringify(result.report, null, 2)], {type:"application/json"}));
+      const link = document.createElement("a"); link.href = url;
+      link.download = `threadlamp-diagnostics-${new Date().toISOString().replace(/[:.]/g,"-")}.json`;
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notice("Diagnostic report downloaded. It contains metadata only, not chat text.");
+    } catch (error) { notice(error.message, true); }
+  });
+  $("diagnostics-clear").addEventListener("click", async () => {
+    if (!confirm("Clear saved diagnostic events and error snapshots? Existing downloaded reports are not deleted.")) return;
+    try { await request("DG_CLEAR"); await diagnosticSettings(); notice("Diagnostics cleared. A connected helper refreshes its copy within 30 seconds."); }
+    catch (error) { notice(error.message, true); }
+  });
   const poll = setInterval(refresh, 2000);
   window.addEventListener("unload", () => clearInterval(poll));
   void refresh();

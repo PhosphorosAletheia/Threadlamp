@@ -27,7 +27,7 @@
     let inFlight = 0;
     ws.onopen = () => {
       if (!current()) return ws.close();
-      ws.send(JSON.stringify({type:"auth", protocol:LanProtocol.protocol, token:settings.token}));
+      ws.send(JSON.stringify({type:"auth", protocol:LanProtocol.protocol, token:settings.token, capabilities:["diagnostics-v1"]}));
       timer = setInterval(() => {
         if (!current()) return;
         if (Date.now() - lastSeen > 45000) return ws.close();

@@ -14,10 +14,14 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     helper=createHelper(config,{key:fs.readFileSync(path.join(privateDir,"server-key.pem")),cert:fs.readFileSync(path.join(privateDir,"server-cert.pem"))});await helper.start();
     bridge=new WebSocket(`ws://127.0.0.1:${bridgePort}/threadlamp/bridge`,{origin:`chrome-extension://${"a".repeat(32)}`});await once(bridge,"open");const ready=once(bridge,"message");bridge.send(JSON.stringify({type:"auth",protocol:1,token:config.bridgeToken}));await ready;
     const agent={tabId:17,instanceId:"invented-agent",revision:"1",url:"https://chatgpt.com/c/example",title:"Example Project",chatTitle:"Example chat",online:true,running:false,mode:"idle",logicPhase:"idle",queuedPrompts:[],capabilities:{queue:true,queue_append:true,cancel_queue:true,start_logic:true}};
-    const actions=[];
+    const actions=[]; let diagnosticEnabled=true, diagnosticCleared=false;
     bridge.on("message",bytes=>{
       const message=JSON.parse(bytes);if(message.type!=="request")return;
       const r=message.request;let response={ok:true};
+      if(r.type==="DG_SET")diagnosticEnabled=r.enabled;
+      if(r.type==="DG_CLEAR")diagnosticCleared=true;
+      if(["DG_GET","DG_SET","DG_CLEAR"].includes(r.type))response={ok:true,enabled:diagnosticEnabled,eventCount:diagnosticCleared?0:4,incidentCount:diagnosticCleared?0:1};
+      if(r.type==="DG_EXPORT")response={ok:true,report:{schema:1,enabled:diagnosticEnabled,events:[],incidents:[]}};
       if(r.type==="DB_LIST")response={ok:true,agents:[agent,{...agent,tabId:18,instanceId:"other-invented-agent",title:"Other Project",url:"https://chatgpt.com/c/other-example"}],events:[],version:"1.13.0"};
       if(r.type==="DB_INSPECT")response={ok:true,schedule:null,connection:null,defaultPrompt:"Check scheduled work."};
       if(r.type==="HA_GET_SETTINGS")response={enabled:false,approvalMessage:"Approved",connection:{phase:"disconnected"}};
@@ -35,7 +39,11 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     const {targetId}=await call("Target.createTarget",{url:"about:blank"});const {sessionId}=await call("Target.attachToTarget",{targetId,flatten:true});
     const command=(method,params)=>call(method,params,sessionId);await command("Runtime.enable");await command("Page.enable");
     const evaluate=async expression=>{const r=await command("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);return r.result.value;};
-    const waitFor=async expression=>{for(let i=0;i<150;i++){if(await evaluate(expression))return;await sleep(100);}throw Error("Browser condition timed out: "+expression);};
+    const waitFor=async expression=>{for(let i=0;i<150;i++){
+      try { if(await evaluate(expression))return; }
+      catch(error) { if(!/Inspected target navigated|Execution context was destroyed|Cannot find context/.test(error.message))throw error; }
+      await sleep(100);
+    }throw Error("Browser condition timed out: "+expression);};
     await command("Page.navigate",{url:config.origin});await waitFor('!!document.getElementById("login-form")');
     await waitFor('!!document.querySelector(".lan-install button")');
     const appManifest=await command("Page.getAppManifest");
@@ -54,6 +62,22 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     assert.equal(await evaluate('!!document.querySelector(".preferences-body #lan-sign-out")'),true);
     assert.equal(await evaluate('!!document.querySelector(".top-actions #lan-sign-out")'),false);
     assert.equal(await evaluate('document.getElementById("lan-camera-layout").value'),"safe");
+    await evaluate('document.getElementById("preferences-toggle").click()');
+    await waitFor('document.getElementById("diagnostics-status").textContent.includes("1 error snapshots")');
+    await evaluate('document.getElementById("diagnostics-enabled").click()');
+    await waitFor('!document.getElementById("diagnostics-enabled").disabled');
+    assert.equal(diagnosticEnabled,false);
+    const downloads=path.join(dir,"downloads");fs.mkdirSync(downloads);
+    await call("Browser.setDownloadBehavior",{behavior:"allow",downloadPath:downloads});
+    await evaluate('document.getElementById("diagnostics-export").click()');
+    for(let i=0;i<100 && !fs.readdirSync(downloads).some(f=>f.endsWith(".json"));i++)await sleep(50);
+    const exported=fs.readdirSync(downloads).find(f=>f.endsWith(".json"));assert.ok(exported,"diagnostic report downloads");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(downloads,exported))).schema,1);
+    await evaluate('window.confirm=()=>true;document.getElementById("diagnostics-clear").click()');
+    await waitFor('document.getElementById("diagnostics-status").textContent.includes("0 error snapshots")');
+    assert.equal(diagnosticCleared,true);
+    await evaluate('document.getElementById("preferences-dialog").close()');
+
     await evaluate('document.getElementById("lan-camera-layout").value="right";document.getElementById("lan-camera-layout").dispatchEvent(new Event("change"))');
     await evaluate('window.dispatchEvent(new Event("appinstalled"))');
     assert.equal(await evaluate('document.querySelector(".lan-install button").hidden'),true);
@@ -160,9 +184,9 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
       await command("Page.navigate",{url:`file://${local}/index.html`});await waitFor('!!document.getElementById("smoke-result")');
       const results=await evaluate('[...document.querySelectorAll("#smoke-result")].map(n=>n.textContent)');assert.equal(results.length,1);assert.match(results[0],/^PASS:/);
     }
-    assert.deepEqual(errors,[]);console.log("PASS: saved camera layout, compact corner headers with activity badge, narrow/landscape fallback, Sign out in Settings; full-screen dynamic viewport/insets, keyboard-sized viewport, zoom and fullscreen exit; dashboard/login reload, hidden-agent draft cancellation, pending-command warning, no replay; PWA manifest, install prompt and dismissal, installed state, Android-sized login; HTTPS login, real LAN RPC, queue target, mobile layout, session expiry preserves drafts; local dashboard desktop/mobile regression.");
+    assert.deepEqual(errors,[]);console.log("PASS: diagnostic download, disable and clear controls; saved camera layout, compact corner headers with activity badge, narrow/landscape fallback, Sign out in Settings; full-screen dynamic viewport/insets, keyboard-sized viewport, zoom and fullscreen exit; dashboard/login reload, hidden-agent draft cancellation, pending-command warning, no replay; PWA manifest, install prompt and dismissal, installed state, Android-sized login; HTTPS login, real LAN RPC, queue target, mobile layout, session expiry preserves drafts; local dashboard desktop/mobile regression.");
   } finally {
     cdp?.close();bridge?.terminate();if(chrome && chrome.exitCode === null && chrome.signalCode === null){const closed=once(chrome,"exit");chrome.kill("SIGTERM");await closed;}
-    if(helper)await helper.close();fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:200});
+    if(helper)await helper.close();await fs.promises.rm(dir,{recursive:true,force:true,maxRetries:15,retryDelay:200});
   }
-})().catch(e=>{console.error(e.message);process.exitCode=1;});
+})().catch(e=>{console.error(e.stack || e.message);process.exitCode=1;});

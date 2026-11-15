@@ -46,9 +46,9 @@ async function main() {
   const config = JSON.parse(fs.readFileSync(configPath,"utf8"));
   const url = new URL(config.origin);
   if (!privateHost(url.hostname) || config.version !== 1 || !Number.isInteger(config.bridgePort) || config.bridgePort < 1024 || config.bridgePort > 65535) throw new Error("Invalid helper configuration.");
-  const helper = createHelper(config,{key:fs.readFileSync(path.join(directory,"server-key.pem")),cert:fs.readFileSync(path.join(directory,"server-cert.pem"))});
+  const helper = createHelper(config,{key:fs.readFileSync(path.join(directory,"server-key.pem")),cert:fs.readFileSync(path.join(directory,"server-cert.pem"))}, {diagnosticsDirectory:path.join(directory,"diagnostics")});
   const result = await helper.start();
-  console.log(`Threadlamp LAN dashboard: ${result.origin}\nExtension bridge: 127.0.0.1:${result.bridgePort}\nKeep this helper and Chrome running. Press Ctrl+C to stop.`);
+  console.log(`Threadlamp LAN dashboard: ${result.origin}\nExtension bridge: 127.0.0.1:${result.bridgePort}\nLocal diagnostic report: ${path.join(directory,"diagnostics/latest.json")}\nKeep this helper and Chrome running. Press Ctrl+C to stop.`);
   for (const signal of ["SIGINT","SIGTERM"]) process.once(signal,() => void helper.close().then(() => process.exit(0)));
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode=1; });

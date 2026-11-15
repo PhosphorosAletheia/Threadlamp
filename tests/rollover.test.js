@@ -20,6 +20,8 @@ function exposeContentFunctions(source) {
   return `${source.slice(0, index)}
     Object.assign(globalThis.__test, {
       state,
+      recordDiagnostic,
+      diagnosticSnapshot,
       dashboardSnapshot,
       publishOutputSummary,
       executeDashboardCommand,
@@ -267,6 +269,7 @@ function contentHarness(timing = {}) {
   };
   const context = {
     __test: {},
+    ThreadlampDiagnosticSchema: timing.diagnosticSchema,
     console: { ...console, warn: (...args) => warnings.push(args) },
     URL,
     Intl,
@@ -289,6 +292,7 @@ function contentHarness(timing = {}) {
     },
     chrome: {
       runtime: {
+        getManifest: () => ({version:"1.15.0"}),
         onMessage: { addListener() {} },
         sendMessage(request) {
           sentRequest = request;

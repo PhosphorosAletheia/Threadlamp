@@ -219,6 +219,7 @@
     // Only the paired bridge calls this internal capability. Content-script and
     // extension message listeners retain their original sender checks.
     const sender = {id:chrome.runtime.id, url:chrome.runtime.getURL("dashboard.html")};
+    if (request.type.startsWith("DG_")) return DiagnosticWorker.request(request);
     if (request.type.startsWith("DB_")) return handle(request, sender);
     if (request.type === "HA_GET_SETTINGS") {
       const settings = publicSettings();

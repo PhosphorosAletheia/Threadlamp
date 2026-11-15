@@ -16,7 +16,7 @@ test("LAN helper authenticates, restricts authority, and never replays uncertain
   assert.equal(fs.statSync(path.join(dir,"pairing.txt")).mode & 0o777,0o600);
   assert.throws(()=>init(dir,"127.0.0.1"),/already exists/);
   for(const ip of ["0.0.0.0","8.8.8.8","localhost","::1","172.32.0.1"]) assert.equal(privateHost(ip),false);
-  const helper=createHelper(config,{key:fs.readFileSync(path.join(dir,"server-key.pem")),cert:fs.readFileSync(path.join(dir,"server-cert.pem"))},{rpcTimeout:100,authTimeout:500});
+  const helper=createHelper(config,{key:fs.readFileSync(path.join(dir,"server-key.pem")),cert:fs.readFileSync(path.join(dir,"server-cert.pem"))},{rpcTimeout:100,authTimeout:500,diagnosticsDirectory:path.join(dir,"diagnostics"),diagnosticsInterval:100});
   t.after(async()=>{await helper.close();fs.rmSync(parent,{recursive:true,force:true});}); await helper.start();
   const req=(url,body,cookie="",extra={})=>new Promise((resolve,reject)=>{
     const bytes=body===undefined?undefined:JSON.stringify(body);
@@ -59,10 +59,10 @@ test("LAN helper authenticates, restricts authority, and never replays uncertain
   assert.equal((await req("/rpc",{type:"DB_COMMAND",action:"arbitrary"},cookie)).status,403);
   assert.equal((await req("/rpc",{type:"DB_LIST"},cookie,{Origin:"https://evil.example"})).status,403);
   assert.match((await req("/rpc",{type:"DB_LIST"},cookie)).text,/offline/);
-  async function connect(token=config.bridgeToken) {
+  async function connect(token=config.bridgeToken,capabilities=[]) {
     const ws=new WebSocket(`ws://127.0.0.1:${bridgePort}/threadlamp/bridge`,{origin:`chrome-extension://${"a".repeat(32)}`});
     await once(ws,"open"); const result=Promise.race([once(ws,"message").then(([data])=>JSON.parse(data)),once(ws,"close").then(()=>null)]);
-    ws.send(JSON.stringify({type:"auth",protocol:1,token}));return {ws,result:await result};
+    ws.send(JSON.stringify({type:"auth",protocol:1,token,capabilities}));return {ws,result:await result};
   }
   const bad=await connect("x".repeat(43));assert.equal(bad.result,null);
   const first=await connect();assert.equal(first.result.type,"ready");
@@ -77,6 +77,21 @@ test("LAN helper authenticates, restricts authority, and never replays uncertain
   const pending=req("/rpc",{type:"DB_COMMAND",action:"stop"},cookie);await once(second.ws,"message");second.ws.terminate();assert.equal(JSON.parse((await pending).text).uncertain,true);
   const malformed=await connect();malformed.ws.send("null");await once(malformed.ws,"close");
   assert.equal((await req("/login")).status,200,"malformed bridge JSON cannot crash the server");
+  assert.equal(fs.existsSync(path.join(dir,"diagnostics/latest.json")),false,"old extensions are not polled for diagnostics");
+  const diagnostic=await connect(config.bridgeToken,["diagnostics-v1"]);
+  const report={schema:1,generatedAt:Date.now(),enabled:true,events:[{event:"error",reason:"draft_changed",detail:"PRIVATE_DIAGNOSTIC_TEXT"}],incidents:[]};
+  diagnostic.ws.on("message",data=>{
+    const message=JSON.parse(data);
+    assert.equal(message.request.type,"DG_EXPORT","automatic helper polling is read-only");
+    diagnostic.ws.send(JSON.stringify({type:"response",id:message.id,response:{ok:true,report}}));
+  });
+  const file=path.join(dir,"diagnostics/latest.json");
+  for(let i=0;i<100 && !fs.existsSync(file);i++)await new Promise(r=>setTimeout(r,20));
+  assert.equal(fs.existsSync(file),true,"paired diagnostics are mirrored automatically");
+  assert.equal(fs.readFileSync(file,"utf8").includes("PRIVATE_DIAGNOSTIC_TEXT"),false);
+  assert.equal((await req("/diagnostics/latest.json",undefined,cookie)).status,404,"no static diagnostic download bypasses authentication and RPC");
+  const diagnosticClosed=once(diagnostic.ws,"close");diagnostic.ws.close();await diagnosticClosed;
+
   assert.equal((await req("/logout",{},cookie)).status,200);assert.equal((await req("/rpc",{type:"DB_LIST"},cookie)).status,401);
   for(let i=0;i<4;i++) await req("/login",{password:"incorrect"});
   assert.equal((await req("/login",{password})).status,429);
