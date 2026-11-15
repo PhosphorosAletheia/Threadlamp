@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.15.1 beta 1
+
+- Check already-visible delivery evidence when a slow new-chat transition crosses
+  the send confirmation deadline. A short grace period still requires the exact
+  submitted prompt, a unique message ID, and the same project.
+- Restore an active or stopped status box if the page removes its DOM element.
+  Restoring the notice does not resume automation or resend a prompt.
+- Add diagnostic checks for identity rejection, reloads, discarded tabs, and
+  restored status boxes without recording message contents.
+
 ## 1.15.0 beta 1
 
 - Add local diagnostic events and error snapshots for handoffs, sends, reasoning

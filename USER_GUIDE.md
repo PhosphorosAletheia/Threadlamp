@@ -253,7 +253,8 @@ Local diagnostics are on by default. Threadlamp records its version, content-scr
 version, event times, anonymized project/chat references, tab identifiers, state
 changes, and the checks around automatic sends and handoffs. Error snapshots keep
 recent events from that tab, including draft/message lengths, structural checks,
-High-thinking checks, and extension code locations where an error was reported.
+High-thinking checks, identity-confirmation results, page reload/discard indicators,
+and extension code locations where an error was reported.
 Message text, queued instructions, replies, titles, full URLs, and credentials are
 not included. References let us correlate events without exposing project or chat
 IDs; they change when diagnostics are cleared.

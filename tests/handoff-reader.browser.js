@@ -27,6 +27,7 @@ const test=`(async function(window) {
   const check=(ok,label)=>{if(!ok)throw Error(label)};
   let clock=0; const Date={now:()=>clock}, SEND_ENABLE_TIMEOUT_MS=8000, POLL_MS=250;
   const sleep=async()=>{clock+=9000}, state={running:true,runId:1}, queuedPrompts=[];
+  const recordDiagnostic=()=>{};
   let runOwnership=null;
   const wrapper=document.createElement('div');wrapper.setAttribute('data-chatgpt-search-message-ids','01234567-89ab-4cde-8f01-23456789abcd');
   const user=document.createElement('div');user.setAttribute('data-user-message-bubble','true');wrapper.append(user);document.body.append(wrapper);
@@ -42,18 +43,20 @@ const test=`(async function(window) {
   check(rolloverRenderedText(user.textContent)!==rolloverRenderedText(expected),'fixture must reproduce joined raw text');
   check(rolloverRenderedText(messageText(user))===rolloverRenderedText(expected),'reader must preserve paragraph and BR separators');
   check(user.innerHTML===original,'reading must not mutate the live message');
-  for(const scenario of ['match','wrong-text','wrong-id','wrong-project','removed-space']) {
+  for(const scenario of ['match','expired-visible','wrong-text','wrong-id','wrong-project','removed-space']) {
     render(expected);wrapper.setAttribute('data-chatgpt-search-message-ids','01234567-89ab-4cde-8f01-23456789abcd');
     window.location=new URL(home);
     runOwnership={runId:1,identity:chatIdentity(),url:home,submitted:{text:expected,before:{element:null,text:''},deadline:clock-1}};
-    await assertRunLocation(1);
-    check(!!runOwnership.submitted.verifiedUserId,'observed delivery retains a message ID');
+    if(scenario!=='expired-visible') {
+      await assertRunLocation(1);
+      check(!!runOwnership.submitted.verifiedUserId,'observed delivery retains a message ID');
+    }
     window.location=new URL(scenario==='wrong-project' ? saved.replace('0123','abcd') : saved);
     if(scenario==='wrong-text')render(expected.replace('unfinished','different'));
     if(scenario==='removed-space')render(expected.replace('unfinished task','unfinishedtask'));
     if(scenario==='wrong-id')wrapper.setAttribute('data-chatgpt-search-message-ids','abcdef01-2345-4678-9abc-def012345678');
     let accepted=true;try{await assertRunLocation(1)}catch(error){check(/chat changed/.test(error.message),'expected ownership error');accepted=false}
-    check(accepted===(scenario==='match'),'saved URL adoption: '+scenario);
+    check(accepted===(scenario==='match'||scenario==='expired-visible'),'saved URL adoption: '+scenario);
   }
   user.innerHTML='<p>un<span>broken</span> inline</p><p>Keep\\tthis\\u00a0space\\u200b.</p><button>Copy</button>';
   check(rolloverRenderedText(messageText(user))==='unbroken inline Keep\\tthis\\u00a0space\\u200b.','inline text, tabs, Unicode and UI stripping');

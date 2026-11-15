@@ -25,6 +25,12 @@ const { visibleElement } = require("./rollover.test.js");
       assert.deepEqual(f.sends, [], `${mode}: ${change} before Send must stop the old run`);
       assert.equal(f.api.state.error, true);
       assert.ok(f.api.getOverlayForTest(), "ownership failures stay visible");
+      const oldOverlay = f.api.getOverlayForTest(), detail = f.api.state.detail;
+      oldOverlay.remove();
+      f.api.updateQuickActions();
+      assert.ok(f.api.getOverlayForTest()?.isConnected, "a removed error overlay is restored by the existing UI refresh");
+      assert.equal(f.api.state.detail, detail, "restoring the overlay preserves the failure");
+      assert.equal(f.api.state.running, false, "restoring an error overlay never restarts automation");
     }
   }
 
@@ -77,6 +83,31 @@ const { visibleElement } = require("./rollover.test.js");
     await f.api.runLogicMode(1, false, "Initial task");
     assert.equal(f.sends.length, 1);
     assert.equal(f.api.state.error, crossProject, "only the exact submitted turn in the same project can bind a new chat URL");
+  }
+  // A slow first-send task can run past the deadline before the first location
+  // check. Inspect visible delivery once, while still requiring a unique ID and
+  // exact prompt in the same project. Never resend the startup prompt.
+  for (const scenario of ["visible", "no-id", "wrong-text", "cross-project", "absent", "too-late"]) {
+    const f = fixture(["continue", "idle"]); f.hide();
+    f.window.location = new URL(`https://chatgpt.com/g/${project}/project`);
+    f.api.setTimeoutSnapshotsForTest(role => {
+      if (!f.sends.length || scenario === "absent") return {element:null,text:""};
+      const element = role === "user" ? f.user() : f.assistant();
+      return {element,text:element.textContent};
+    });
+    const click = f.send.click;
+    f.send.click = () => {
+      click();
+      if (f.sends.length !== 1) return;
+      f.advanceClock(scenario === "too-late" ? 600000 : 9000);
+      f.window.location = new URL(`https://chatgpt.com/g/${scenario === "cross-project" ? project.replace("0123","abcd") : project}/c/saved`);
+      if (scenario === "no-id") f.user().getAttribute = () => null;
+      if (scenario === "wrong-text") f.user().textContent = "Different instructions";
+    };
+    await f.api.runLogicMode(1, false, "Initial continuation");
+    assert.equal(f.api.state.error, scenario !== "visible", `expired confirmation: ${scenario}`);
+    assert.deepEqual(f.sends, scenario === "visible" ? ["Initial continuation", "Configured followup"] : ["Initial continuation"], scenario);
+    if (scenario !== "visible") assert.ok(f.api.getOverlayForTest()?.isConnected, "failure notice remains visible");
   }
   // Delivery can be observed on the project landing page long before ChatGPT
   // assigns the saved URL. Keep proof of that message, not just its prompt text.

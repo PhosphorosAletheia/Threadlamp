@@ -5,7 +5,7 @@
   "use strict";
   const events = new Set(["loaded", "state", "error", "handoff_prepare", "handoff_claimed", "handoff_verified",
     "draft_cleared", "thinking_verified", "prompt_written", "send_attempt", "send_observed", "handoff_complete",
-    "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored"]);
+    "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored", "page_hidden", "overlay_restored"]);
   const reasons = new Set(["none", "other", "chat_changed", "project_changed", "draft_changed", "high_thinking",
     "context_invalidated", "receipt_rejected", "delivery_timeout", "send_unavailable", "handoff_unverified",
     "notification_failed", "server_error", "conversation_limit"]);
@@ -16,7 +16,9 @@
     "expectedLength", "paragraphs", "breaks", "searchIdCount", "wrapperTurns"];
   const booleans = ["running", "paused", "hasComposer", "hasUser", "hasAssistant", "generating", "highThinking",
     "hasLegacyId", "hasSearchWrapper", "singleSearchUUID", "sourceProjectMatches", "draftMatchesExpected",
-    "draftLooksLikeHandoff", "draftHasQueuedInstructions", "draftSourceProjectMatches"];
+    "draftLooksLikeHandoff", "draftHasQueuedInstructions", "draftSourceProjectMatches", "confirmationExpired",
+    "sourceIsUnsaved", "submissionPresent", "submissionTextMatches", "submissionTurnChanged", "messageIdPresent",
+    "priorMessageIdPresent", "priorMessageIdMatches", "destinationStable", "pageReload", "pageDiscarded", "pagePersisted"];
   const version = value => typeof value === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:\.\d{1,4})?$/.test(value) ? value : "unknown";
   const number = value => Number.isSafeInteger(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER ? value : 0;
   const ref = value => typeof value === "string" && /^[a-f0-9]{16}$/.test(value) ? value : "";

@@ -2748,6 +2748,10 @@ ${LOGIC_START_PROMPT}
   }
 
   function updateQuickActions() {
+    if (overlayHost && !overlayHost.isConnected) {
+      updateOverlay();
+      if (overlayHost?.isConnected) recordDiagnostic("overlay_restored");
+    }
     if (idleLogicUrl && idleLogicUrl !== window.location.href) {
       idleLogicUrl = "";
       if (!state.running && state.mode === "logic" && state.logicPhase === "idle") {
@@ -2894,22 +2898,37 @@ ${LOGIC_START_PROMPT}
         && sourceIsUnsaved
         && (oldProject ? sameRolloverProject(oldProject, currentProject) : !currentProject);
     };
-    // A previously observed message ID proves continuity after a delayed URL
-    // change. Without that proof, retain the original short confirmation window.
-    // Waiting for the destination to render is bounded in either case.
+    // A previously observed message ID permits a bounded rendering wait. Even
+    // after the first-send deadline, inspect the current destination once: a
+    // delayed browser task must not reject already-visible delivery evidence.
     const deadline = submitted?.verifiedUserId ? Date.now() + SEND_ENABLE_TIMEOUT_MS : submitted?.deadline;
+    const destinationIdentity = chatIdentity();
     while (state.running && state.runId === runId && owner === runOwnership
-      && submitted && owner.submitted === submitted && Date.now() <= deadline && candidate()) {
+      && submitted && owner.submitted === submitted && candidate() && chatIdentity() === destinationIdentity) {
       const user = latestMessageSnapshot("user");
-      if (matchesSubmission(user) && (!submitted.verifiedUserId || messageSnapshotId(user) === submitted.verifiedUserId)) {
+      const messageId = messageSnapshotId(user);
+      const beforeDeadline = Date.now() <= deadline;
+      const lateEvidence = !!messageId && (submitted.verifiedUserId
+        || Date.now() <= submitted.deadline + SEND_ENABLE_TIMEOUT_MS);
+      if (matchesSubmission(user) && (!submitted.verifiedUserId || messageId === submitted.verifiedUserId)
+        && (beforeDeadline || lateEvidence)) {
         for (const item of queuedPrompts) { if (item.url === owner.url) item.url = window.location.href; }
         owner.identity = chatIdentity(); owner.url = window.location.href;
-        recordDiagnostic("identity_adopted");
+        recordDiagnostic("identity_adopted", {confirmationExpired:!beforeDeadline, submissionTextMatches:true,
+          messageIdPresent:!!messageId, priorMessageIdPresent:!!submitted.verifiedUserId});
         return;
       }
+      if (!beforeDeadline) break;
       await sleep(POLL_MS);
     }
-    recordDiagnostic("identity_rejected", {reason:"chat_changed"});
+    const observed = latestMessageSnapshot("user"), observedId = messageSnapshotId(observed);
+    recordDiagnostic("identity_rejected", {reason:"chat_changed", confirmationExpired:Date.now() > deadline,
+      sourceIsUnsaved, sourceProjectMatches:candidate(), submissionPresent:!!submitted,
+      submissionTextMatches:!!submitted && rolloverRenderedText(observed.text) === rolloverRenderedText(submitted.text),
+      submissionTurnChanged:!!submitted && snapshotChanged(observed, submitted.before),
+      messageIdPresent:!!observedId, priorMessageIdPresent:!!submitted?.verifiedUserId,
+      priorMessageIdMatches:!!submitted?.verifiedUserId && observedId === submitted.verifiedUserId,
+      destinationStable:chatIdentity() === destinationIdentity});
     throw new Error("The chat changed from the conversation that started automation. Automatic sending stopped; inspect the chat before resuming.");
   }
 
@@ -4346,5 +4365,7 @@ ${LOGIC_START_PROMPT}
   window.setInterval(updateQuickActions, QUICK_ACTION_REFRESH_MS);
   window.setInterval(publishDashboardStatus, 1000);
   window.addEventListener("resize", updateQuickActions, { passive: true });
-  recordDiagnostic("loaded");
+  window.addEventListener("pagehide", event => recordDiagnostic("page_hidden", {pagePersisted:event.persisted === true}));
+  recordDiagnostic("loaded", {pageReload:globalThis.performance?.getEntriesByType?.("navigation")?.[0]?.type === "reload",
+    pageDiscarded:document.wasDiscarded === true});
 })();
