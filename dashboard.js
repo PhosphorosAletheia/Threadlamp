@@ -58,7 +58,7 @@
     if (agent.running) return agent.mode === "loop" ? "Loop running" : "Logic running";
     return "Stopped / idle";
   }
-  function badge(agent) { return !agent.online ? "offline" : agent.error ? "error" : agent.paused ? "paused" : agent.logicPhase === "waiting_user" ? "waiting" : agent.running ? "running" : "stopped"; }
+  function badge(agent) { return !agent.online ? "offline" : agent.error ? "error" : agent.paused ? "paused" : agent.logicPhase === "waiting_user" ? "waiting" : agent.logicPhase === "sleeping" ? "sleeping" : agent.running ? "running" : "stopped"; }
   function matches(agent) {
     if ($("hide-unavailable").checked && !agent.online) return false;
     const query = $("search").value.toLowerCase();

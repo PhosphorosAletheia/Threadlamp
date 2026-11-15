@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.16.2 beta 1
+
+- Show sleeping agents with a light blue bullet. Running agents remain green and paused agents remain blue.
+
 ## 1.16.1 beta 1
 
 - Remove obsolete OpenRouter error messages from agent summaries while retaining saved summaries and genuine Logic SUMMARY notices.
