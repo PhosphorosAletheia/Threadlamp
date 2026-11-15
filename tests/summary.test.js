@@ -13,11 +13,12 @@ const saved = { [CONFIG]: { enabled: true, apiKey: "invented-test-key" } };
 const completion = (id = "output-1", output = "Implemented the requested change. [[LOGIC:IDLE]]") => ({ type: "SUM_COMPLETE", url: sourceUrl, completion: id, output, flag: "idle" });
 const sender = h => ({ id: popup.id, frameId: 0, url: sourceUrl, tab: { ...h.tabs.get(17) } });
 const result = text => ({ ok: true, json: async () => ({ model: "test/free", choices: [{ message: { content: text } }] }) });
-async function setup(fetch = async () => result("Implemented and checked the requested change."), initial = saved) {
+async function setup(fetch = async () => result("Implemented and checked the requested change."), initial = saved, configure = () => {}) {
   const calls = [];
   const h = await harness(structuredClone(initial), { configureContext(context) {
     context.AbortController = AbortController;
     context.fetch = async (...args) => { calls.push(args); return fetch(...args); };
+    configure(context);
   } });
   await h.context.SummaryWorker.list();
   return Object.assign(h, { calls, summary: () => h.local.values[RECORDS]?.[sourceUrl] });
@@ -62,8 +63,9 @@ test("disabled, untrusted, wrong-route, and iframe requests cannot call OpenRout
 });
 
 test("rate limits, malformed responses, and excessive output preserve the previous summary and do not retry", async () => {
+  let now = Date.now(); class Clock extends Date { static now() { return now; } }
   let response = result("Earlier result.");
-  const h = await setup(async () => response);
+  const h = await setup(async () => response, saved, context => {context.Date = Clock;});
   await h.dispatch(completion(), sender(h));
   response = { ok: false, status: 429, json: async () => { throw new Error("must not read provider details"); } };
   await h.dispatch(completion("rate-limited"), sender(h));
@@ -72,6 +74,7 @@ test("rate limits, malformed responses, and excessive output preserve the previo
   assert.equal(h.summary().last.text, "Earlier result.");
   await h.dispatch(completion("rate-limited"), sender(h));
   assert.equal(h.calls.length, 2);
+  now += 60001;
   response = { ok: true, json: async () => ({ error: { message: "private provider payload" } }) };
   await h.dispatch(completion("malformed"), sender(h));
   assert.match(h.summary().error, /no usable summary/);
@@ -157,6 +160,69 @@ test("clearing during capture preparation prevents an old request from being sen
   await release(); await request;
   assert.equal(h.calls.length, 0);
   assert.equal(h.summary(), undefined);
+});
+
+test("rate-limit cooldown is shared across agents, honors Retry-After, and survives a worker restart", async () => {
+  let now = Date.parse("2026-11-15T06:00:00Z"); class Clock extends Date { static now() { return now; } }
+  const configure = context => { context.Date = Clock; };
+  const h = await setup(async () => ({ok:false,status:429,headers:{get:() => "120"}}), saved, configure);
+  await h.dispatch(completion("rate"), sender(h));
+  assert.equal(h.local.values.logicSummaryCooldown.until, now + 120000);
+  const other = {id:popup.id,frameId:0,url:h.tabs.get(99).url,tab:{...h.tabs.get(99)}};
+  await h.dispatch({...completion("other"),url:other.url}, other);
+  assert.equal(h.calls.length,1,"other agents do not call the provider during cooldown");
+  assert.match(h.local.values[RECORDS][other.url].error,/cooling down/);
+  const restarted = await setup(undefined,h.local.values,configure);
+  await restarted.dispatch(completion("restarted"),sender(restarted));
+  assert.equal(restarted.calls.length,0,"worker restarts do not bypass cooldown");
+  now += 120001;
+  await restarted.dispatch(completion("after"),sender(restarted));
+  assert.equal(restarted.calls.length,1,"only a new output after cooldown is sent");
+  const report=(await h.dispatch({type:"DG_EXPORT"})).report;
+  assert.ok(report.events.some(e=>e.reason==="summary_rate_limit"&&e.httpStatus===429));
+  assert.ok(report.events.some(e=>e.reason==="summary_cooldown"));
+});
+
+test("repeated rate limits back off and HTTP-date Retry-After is respected", async () => {
+  let now = Date.parse("2026-11-15T06:00:00Z"), header = "invalid";
+  class Clock extends Date { static now() { return now; } }
+  const h=await setup(async()=>({ok:false,status:429,headers:{get:()=>header}}),saved,c=>{c.Date=Clock;});
+  await h.dispatch(completion("one"),sender(h));
+  assert.equal(h.local.values.logicSummaryCooldown.until,now+60000);
+  now+=60001;
+  await h.dispatch(completion("two"),sender(h));
+  assert.equal(h.local.values.logicSummaryCooldown.until,now+120000);
+  now+=120001; header=new Date(now+600000).toUTCString();
+  await h.dispatch(completion("three"),sender(h));
+  assert.equal(h.local.values.logicSummaryCooldown.until,Date.parse(header));
+});
+
+test("summary diagnostics distinguish network, timeout, cancellation and malformed JSON without private text", async () => {
+  const secret="PRIVATE_PROVIDER_DETAIL";
+  for(const kind of ["network","timeout","cancelled","response"]) {
+    const h=await setup((_url,options)=>{
+      if(kind==="network")throw new TypeError(secret);
+      if(kind==="response")return {ok:true,status:200,json:async()=>{throw new SyntaxError(secret);}};
+      return new Promise((_resolve,reject)=>options.signal.addEventListener("abort",()=>reject(new Error(secret)),{once:true}));
+    });
+    h.context.setTimeout=(callback,ms)=>setTimeout(callback,ms===25000?10:ms);
+    const pending=h.dispatch(completion("classified"),sender(h));
+    if(kind==="cancelled") {
+      while(!h.calls.length)await h.flush();
+      await h.dispatch({type:"SUM_SAVE",enabled:false});
+    }
+    await pending;
+    const report=(await h.dispatch({type:"DG_EXPORT"})).report;
+    const error=report.events.find(e=>e.event==="summary_error");
+    assert.equal(error.reason,"summary_"+kind,kind);
+    assert.equal(error.inputLength,completion().output.length);
+    assert.equal(error.responseHeadersReceived,kind==="response");
+    assert.equal(report.incidents.length,1);
+    assert.equal(JSON.stringify(report).includes(secret),false);
+    assert.equal(JSON.stringify(report).includes(completion().output),false);
+    assert.equal(JSON.stringify(report).includes("invented-test-key"),false);
+    assert.equal(h.summary().error.includes(secret),false);
+  }
 });
 
 test("settings require host permission, keep keys private, and preserve a saved key on blank updates", async () => {

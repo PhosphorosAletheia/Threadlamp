@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.15.2 beta 1
+
+- Share a persistent summary cooldown across agents after OpenRouter rate limits.
+  Honor Retry-After when supplied, otherwise increase the wait after repeated 429s.
+- Report summary timeouts, network failures, cancellations, and invalid responses
+  separately. Include request lengths, elapsed time, and HTTP status in private
+  diagnostics without recording keys, outputs, or provider response bodies.
+- Fix extension-local diagnostic controls being intercepted by the general
+  message handler.
+
 ## 1.15.1 beta 1
 
 - Check already-visible delivery evidence when a slow new-chat transition crosses

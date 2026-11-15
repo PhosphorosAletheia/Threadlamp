@@ -189,8 +189,14 @@ The model is fixed to `openrouter/free`, with no paid-model fallback. Free-provi
 availability, rate limits and context windows vary. Requests time out after 25
 seconds; up to four can run concurrently. Outputs over 200,000 characters are
 reported as too large without sending an excerpt. Summaries are limited to 2,000
-characters. Failures are displayed and are not automatically retried; the next
-completed response gets a fresh attempt. A worker/browser restart marks an
+characters. Failures are displayed and are not automatically retried. After an
+OpenRouter rate-limit response (HTTP 429), all agents share a cooldown: Threadlamp
+honors Retry-After when supplied, otherwise waits one minute and increases the
+wait after repeated limits, up to one hour. The cooldown survives extension and
+browser restarts. Outputs completed during the cooldown are not sent or queued
+for later replay; the next new completed response after it expires can try again.
+A cooldown cannot overcome a daily provider quota. Clearing saved summaries does
+not bypass the cooldown. A worker/browser restart marks an
 interrupted request as failed, without storing or replaying the original output.
 
 The API key and up to 100 conversation summary records remain in local extension
@@ -254,7 +260,8 @@ version, event times, anonymized project/chat references, tab identifiers, state
 changes, and the checks around automatic sends and handoffs. Error snapshots keep
 recent events from that tab, including draft/message lengths, structural checks,
 High-thinking checks, identity-confirmation results, page reload/discard indicators,
-and extension code locations where an error was reported.
+and extension code locations where an error was reported. OpenRouter request
+lengths, elapsed times, HTTP status, and error categories are included too.
 Message text, queued instructions, replies, titles, full URLs, and credentials are
 not included. References let us correlate events without exposing project or chat
 IDs; they change when diagnostics are cleared.
@@ -270,7 +277,8 @@ history, queues, schedules, or settings.
 The paired LAN helper saves a private host file automatically every 30 seconds
 while connected: `diagnostics/latest.json` inside its setup directory. With the
 default setup, that is `~/.config/threadlamp-lan/diagnostics/latest.json`. Restart
-the updated helper once to enable this feature. It overwrites that one file rather
+the updated helper once to enable this feature, and after updates that add new
+diagnostic fields. It overwrites that one file rather
 than accumulating logs. After disconnecting, the file remains the last available
 snapshot; its `generatedAt` time shows its age. A clear operation reaches the file
 on the next successful sync; existing downloads are never deleted automatically.

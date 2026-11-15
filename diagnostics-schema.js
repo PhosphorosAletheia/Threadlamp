@@ -5,20 +5,25 @@
   "use strict";
   const events = new Set(["loaded", "state", "error", "handoff_prepare", "handoff_claimed", "handoff_verified",
     "draft_cleared", "thinking_verified", "prompt_written", "send_attempt", "send_observed", "handoff_complete",
-    "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored", "page_hidden", "overlay_restored"]);
+    "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored", "page_hidden", "overlay_restored",
+    "summary_start", "summary_ready", "summary_error", "summary_skipped"]);
   const reasons = new Set(["none", "other", "chat_changed", "project_changed", "draft_changed", "high_thinking",
     "context_invalidated", "receipt_rejected", "delivery_timeout", "send_unavailable", "handoff_unverified",
-    "notification_failed", "server_error", "conversation_limit"]);
+    "notification_failed", "server_error", "conversation_limit", "summary_timeout", "summary_network",
+    "summary_cancelled", "summary_response", "summary_rate_limit", "summary_cooldown", "summary_access",
+    "summary_http", "summary_busy", "summary_size", "summary_settings", "summary_internal"]);
   const modes = new Set(["idle", "logic", "loop", "setup"]);
   const phases = new Set(["idle", "starting", "monitoring", "waiting_user", "waiting", "sleeping", "rolling_over",
     "stopping", "recovery_paused", "reconnecting", "resuming", "arming_heartbeat", "server_setup", "sending"]);
   const numbers = ["runId", "count", "limit", "queueCount", "draftLength", "userLength", "userRenderedLength",
-    "expectedLength", "paragraphs", "breaks", "searchIdCount", "wrapperTurns"];
+    "expectedLength", "paragraphs", "breaks", "searchIdCount", "wrapperTurns", "inputLength", "durationMs",
+    "httpStatus", "activeRequests", "requestOrdinal", "cooldownSeconds"];
   const booleans = ["running", "paused", "hasComposer", "hasUser", "hasAssistant", "generating", "highThinking",
     "hasLegacyId", "hasSearchWrapper", "singleSearchUUID", "sourceProjectMatches", "draftMatchesExpected",
     "draftLooksLikeHandoff", "draftHasQueuedInstructions", "draftSourceProjectMatches", "confirmationExpired",
     "sourceIsUnsaved", "submissionPresent", "submissionTextMatches", "submissionTurnChanged", "messageIdPresent",
-    "priorMessageIdPresent", "priorMessageIdMatches", "destinationStable", "pageReload", "pageDiscarded", "pagePersisted"];
+    "priorMessageIdPresent", "priorMessageIdMatches", "destinationStable", "pageReload", "pageDiscarded", "pagePersisted",
+    "responseHeadersReceived"];
   const version = value => typeof value === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:\.\d{1,4})?$/.test(value) ? value : "unknown";
   const number = value => Number.isSafeInteger(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER ? value : 0;
   const ref = value => typeof value === "string" && /^[a-f0-9]{16}$/.test(value) ? value : "";

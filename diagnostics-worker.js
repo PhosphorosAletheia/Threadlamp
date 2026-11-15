@@ -33,8 +33,8 @@
     const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(salt + ":" + value));
     return Array.from(new Uint8Array(bytes).slice(0,8), n => n.toString(16).padStart(2,"0")).join("");
   }
-  async function record(request, sender) {
-    if (!schema.events.has(request.event?.event) || sender.frameId !== 0 || !await isTrustedChatSender(sender)) {
+  async function record(request, sender, trustedWorker = false) {
+    if (!schema.events.has(request.event?.event) || sender.frameId !== 0 || (!trustedWorker && !await isTrustedChatSender(sender))) {
       throw new Error("Untrusted diagnostic event.");
     }
     const now = Date.now(), rate = rates.get(sender.tab.id);
@@ -53,7 +53,7 @@
       const last = data.events.at(-1);
       if (last && now-last.at < 2000 && JSON.stringify({...last,at:0}) === JSON.stringify({...item,at:0})) return {ok:true};
       data.events.push(item); data.events = data.events.slice(-400);
-      if (item.event === "error" || item.event === "identity_rejected") {
+      if (item.event === "error" || item.event === "identity_rejected" || item.event === "summary_error") {
         data.incidents.push({at:now, tabId:item.tabId, reason:item.reason,
           events:data.events.filter(e => e.tabId === item.tabId).slice(-40)});
         data.incidents = data.incidents.slice(-20);
@@ -70,7 +70,12 @@
       return {ok:true, enabled:data.enabled, eventCount:data.events.length, incidentCount:data.incidents.length, dropped};
     });
   }
-  globalThis.DiagnosticWorker = {request};
+  // Internal worker calls use the sender already validated when the summary was
+  // accepted. A tab may navigate while its provider request is outstanding.
+  globalThis.DiagnosticWorker = {request, recordSummary: (event, sender, instance) => {
+    if (!["summary_start", "summary_ready", "summary_error", "summary_skipped"].includes(event?.event)) return Promise.resolve();
+    return record({event, instance}, sender, true);
+  }};
   chrome.runtime.onMessage.addListener((input, sender, respond) => {
     if (!String(input?.type || "").startsWith("DG_")) return false;
     const work = input.type === "DG_RECORD" ? record(input, sender)

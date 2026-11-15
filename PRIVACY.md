@@ -1,7 +1,7 @@
 # Threadlamp privacy notice
 
 Publisher: [Phosphoros Research](https://phosphoros-research.pages.dev/).
-Applies to Threadlamp 1.15.1 beta 1. Updated November 15, 2026.
+Applies to Threadlamp 1.15.2 beta 1. Updated November 15, 2026.
 
 ## Data handled
 
@@ -16,7 +16,7 @@ There is no extension-operated publisher telemetry, advertising or analytics ser
 | Chat URLs/titles, project labels, status and short input-request summaries | Used in the dashboard; bounded agent/event records are stored locally. |
 | Scheduled prompts, times, timezone and dispatch state | Stored locally for heartbeats across background-worker restarts. |
 | Pending prompt queues and drafts | Held in the tab; a pending rollover may temporarily carry queue data in extension session storage. |
-| OpenRouter API key and output summaries | If enabled, the key and up to 100 conversation records are stored locally in trusted extension storage. Each record retains the latest summary, model, ending tag, timestamps/status and up to 30 completion hashes. Raw outputs are held transiently for a request, not persisted. |
+| OpenRouter API key and output summaries | If enabled, the key and up to 100 conversation records are stored locally in trusted extension storage. Each record retains the latest summary, model, ending tag, timestamps/status and up to 30 completion hashes. Raw outputs are held transiently for a request, not persisted. A shared rate-limit cooldown stores only its expiry and backoff count. |
 | Home Assistant address, notification action and access token | Stored locally only if configured; used to contact that service. |
 | Project server bindings, credentials, setup state and event identifiers | Stored locally if configured; used for pairing and routed event delivery. |
 | Logic reconnection checkpoints | Tab/conversation identity, follow-up settings and count, and a hash of the last user message ID and text are held in extension session storage. No transcript is saved; up to 100 recent checkpoints are retained and expire for recovery after ten minutes without updates. |
@@ -108,7 +108,9 @@ See [LAN setup](LAN_DASHBOARD.md) for access and retention details.
 Diagnostic recording is enabled by default and can be disabled or cleared from
 Dashboard Settings. It stores only allowlisted metadata: versions, timestamps,
 tab IDs, anonymized project/chat references, automation states, error categories,
-extension code locations, counts, lengths, and boolean check results. It excludes
+extension code locations, counts, lengths, and boolean check results. Summary
+request metadata includes elapsed time, HTTP status, input length, and categorized
+errors; provider response bodies are excluded. It excludes
 prompt and response text, queued instructions, titles, raw project/chat IDs, full
 URLs, credentials, and arbitrary page or Console content. No diagnostic report is
 sent to an external analytics service.
