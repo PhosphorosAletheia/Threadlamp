@@ -187,3 +187,38 @@ test("upgrade removes retired provider errors, preserves summaries and keeps coo
   const restarted = await setup(undefined,h.local.values);
   assert.equal(restarted.summary().last.text,last.text,"Migration is safe to repeat");
 });
+
+
+test("summary data never reaches OpenRouter, including failures, restart and subsequent rewrites", async () => {
+  const privateOutput = "PRIVATE_OUTPUT_SENTINEL", privateSummary = "PRIVATE_SUMMARY_SENTINEL";
+  const h = await setup(undefined, {...saved,[RECORDS]:{
+    [sourceUrl]:{status:"pending",output:privateOutput,last:{text:privateSummary,model:"legacy/free"}}
+  }});
+  for (const [tag,flag] of [["CONTINUE","continue"],["USER_INPUT","user_input"],["IDLE","idle"],["WAIT:5m","wait"],["WAIT:999m","invalid_wait"]]) {
+    for (const [kind,summary] of [["valid",privateSummary],["oversized","x".repeat(601)],["missing",""]]) {
+      const output = `${privateOutput}\n${summary ? `[[LOGIC:SUMMARY: ${summary}]]\n` : ""}[[LOGIC:${tag}]]`;
+      const response = await h.dispatch({...completion(tag+kind,output),flag},sender(h));
+      assert.equal(response.ok,true);
+    }
+  }
+  await h.dispatch({type:"SUM_GET"});
+  await h.context.DashboardWorker.remote({type:"DB_LIST"});
+  await h.context.SummaryWorker.rewriteStatus();
+  assert.equal(h.calls.length,0,"Enabled OpenRouter settings never cause a summary request or fallback");
+  const restarted = await setup(undefined,h.local.values);
+  await restarted.context.DashboardWorker.remote({type:"DB_LIST"});
+  assert.equal(restarted.calls.length,0,"Worker restart never retries old summary work");
+  const request = {type:"SUM_REWRITE",text:"Please check the spelling.",limit:4000,
+    output:privateOutput,summary:privateSummary};
+  assert.equal((await restarted.dispatch(request,sender(restarted))).ok,false);
+  assert.equal(restarted.calls.length,0,"A chat cannot request a provider rewrite");
+  assert.equal((await restarted.dispatch(request)).ok,true);
+  assert.equal(restarted.calls.length,1,"Only the explicit dashboard rewrite calls the provider");
+  const body = JSON.parse(restarted.calls[0][1].body);
+  assert.equal(body.messages.length,2);
+  assert.equal(body.messages[1].content,request.text);
+  assert.equal(JSON.stringify(body).includes(privateOutput),false);
+  assert.equal(JSON.stringify(body).includes(privateSummary),false);
+  await restarted.dispatch({type:"SUM_CLEAR"});
+  assert.equal(restarted.calls.length,1,"Clearing summaries never calls the provider");
+});
