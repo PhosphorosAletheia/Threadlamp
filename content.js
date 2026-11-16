@@ -54,6 +54,7 @@
   const MINUTE_MS = 60 * 1000;
   const LOGIC_STATUS_PROMPT = "Status";
   const DELIVERY_TIMEOUT_MESSAGE = "message delivery timed out. please try again.";
+  const STREAM_ERROR_MESSAGE = "error in message stream";
   const QUICK_ACTIONS = [
     { label: "Continue", prompt: "continue" },
     { label: "Status", prompt: "status" }
@@ -251,7 +252,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     ].some(pattern => pattern.test(text));
   }
 
-  function findDeliveryTimeoutNotice() {
+  function findConnectionErrorNotice() {
     const users = messageElements("user");
     const assistants = messageElements("assistant");
     const lastUser = users.at(-1);
@@ -260,14 +261,14 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     const candidates = new Set();
     for (const button of document.querySelectorAll("button, [role='button']")) {
       if (!buttonIsEnabled(button) || normalizeText(button.getAttribute("aria-label") || button.textContent) !== "retry") continue;
-      // The captured notice is a small, unlabelled sibling container with this
-      // exact text and a Retry button. Classes and Radix IDs are not stable.
+      // Captured connection errors are small sibling containers with an exact
+      // label and Retry button, outside message prose. Never activate Retry.
       let parent = button.parentElement;
       for (let depth = 0; parent && parent !== document.body && depth < 5; depth++, parent = parent.parentElement) {
         const text = normalizeText(parent.textContent);
         // textContent may concatenate sibling blocks without a separator.
-        if (![`${DELIVERY_TIMEOUT_MESSAGE} retry`, `${DELIVERY_TIMEOUT_MESSAGE}retry`,
-          `retry ${DELIVERY_TIMEOUT_MESSAGE}`, `retry${DELIVERY_TIMEOUT_MESSAGE}`].includes(text)) continue;
+        if (![DELIVERY_TIMEOUT_MESSAGE, STREAM_ERROR_MESSAGE].some(message =>
+          [`${message} retry`, `${message}retry`, `retry ${message}`, `retry${message}`].includes(text))) continue;
         if (!isVisible(parent) || parent.closest("article, [data-message-author-role], [data-message-content], .markdown, .prose")
           || [...users, ...assistants].some(turn => turn.contains(parent) || parent.contains(turn))) break;
         if ((lastUser && !elementComesAfter(parent, lastUser)) || (lastAssistant && !elementComesAfter(parent, lastAssistant))) break;
@@ -278,10 +279,11 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     return candidates.size === 1 ? [...candidates][0] : null;
   }
 
-  function deliveryTimeoutResponse() {
+  function connectionErrorResponse() {
     if (state.mode !== "logic" || isGenerating()) return null;
-    const notice = findDeliveryTimeoutNotice();
-    return notice ? { deliveryTimeout: true, notice, element: null, text: "" } : null;
+    const notice = findConnectionErrorNotice();
+    return notice ? { connectionError: true, notice, element: null, text: "",
+      reason: normalizeText(notice.textContent).includes(STREAM_ERROR_MESSAGE) ? "message_stream_error" : "delivery_timeout" } : null;
   }
 
   function reconnectMessage(type, extra = {}) {
@@ -371,9 +373,9 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     void reconnectMessage("LR_CLEAR").catch(() => {});
   }
 
-  async function recoverDeliveryTimeout(runId, response) {
+  async function recoverConnectionError(runId, response) {
     if (reconnectPending) return null;
-    if (reconnectAttempted) { pauseReconnect("ChatGPT reported another delivery timeout after reconnection."); return null; }
+    if (reconnectAttempted) { pauseReconnect("ChatGPT reported another connection error after reconnection."); return null; }
     reconnectPending = true;
     const url = window.location.href, userBeforeReload = latestMessageSnapshot("user");
     try {
@@ -388,13 +390,13 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       state.paused = false;
       setDetail("Connection lost. Waiting 30 seconds before one reload; no prompt will be resent…");
       state.paused = true; state.pausedDetail = state.detail;
-      state.logicPhase = "reconnecting"; recordDiagnostic("reconnect_start"); updateOverlay();
+      state.logicPhase = "reconnecting"; recordDiagnostic("reconnect_start", {reason:response.reason}); updateOverlay();
       const started = Date.now();
       while (Date.now() - started < 30000) {
         if (!state.running || state.runId !== runId) return null;
         if (window.location.href !== url || !state.paused || isGenerating()
           || queuedPrompts[0] || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
-          || findDeliveryTimeoutNotice() !== response.notice) {
+          || findConnectionErrorNotice() !== response.notice) {
           throw new Error("The chat changed while preparing reconnection. Inspect it before resuming.");
         }
         await sleep(POLL_MS);
@@ -403,7 +405,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       if (!result?.ok) throw new Error(result?.error || "Reconnection could not be prepared.");
       if (!state.running || state.runId !== runId || window.location.href !== url || !state.paused
         || isGenerating() || queuedPrompts[0] || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
-          || findDeliveryTimeoutNotice() !== response.notice) {
+          || findConnectionErrorNotice() !== response.notice) {
         await reconnectMessage("LR_CLEAR");
         if (state.runId === runId) throw new Error("The chat changed before reload. Inspect it before resuming.");
         return null;
@@ -440,7 +442,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       let readySince = null;
       while (state.running && state.runId === runId && Date.now() - started < 60000) {
         if (window.location.href !== url) throw new Error("The conversation changed after reload.");
-        if (findDeliveryTimeoutNotice() || hasMaximumLengthNotice()) throw new Error("ChatGPT reported another error after reload.");
+        if (findConnectionErrorNotice() || hasMaximumLengthNotice()) throw new Error("ChatGPT reported another error after reload.");
         if (reconnectPageError()) throw new Error("ChatGPT reported another error after reload.");
         const user = latestMessageSnapshot("user"), composer = findComposer();
         if (composerText(composer)) throw new Error("A draft is present after reload; it has been preserved.");
@@ -469,10 +471,10 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     if (!state.running || state.mode !== "logic" || state.paused || state.error) { timeoutSeenAt = null; return; }
     if (!["monitoring", "starting", "resuming"].includes(state.logicPhase)) return;
     if (reconnectAttempted && reconnectPageError()) { pauseReconnect("ChatGPT reported another error after reconnection."); return; }
-    const timeout = deliveryTimeoutResponse();
+    const timeout = connectionErrorResponse();
     if (timeout) {
       timeoutSeenAt ??= Date.now();
-      if (Date.now() - timeoutSeenAt >= ACTIVITY_WINDOW_MS) await recoverDeliveryTimeout(state.runId, timeout);
+      if (Date.now() - timeoutSeenAt >= ACTIVITY_WINDOW_MS) await recoverConnectionError(state.runId, timeout);
     } else {
       timeoutSeenAt = null;
       try { await checkpointLogicRun(); } catch { /* Recovery will report an unavailable checkpoint if needed. */ }
@@ -3421,7 +3423,7 @@ ${LOGIC_START_PROMPT}
         return null;
       }
 
-      const timeout = deliveryTimeoutResponse();
+      const timeout = connectionErrorResponse();
       if (timeout) {
         // A previous notice can linger briefly after Send, before generation
         // begins. Do not classify that notice or an older response immediately.
@@ -3486,7 +3488,7 @@ ${LOGIC_START_PROMPT}
         return null;
       }
 
-      const timeout = deliveryTimeoutResponse();
+      const timeout = connectionErrorResponse();
       if (timeout) return timeout;
 
       const current = latestMessageSnapshot("assistant");
@@ -3532,7 +3534,7 @@ ${LOGIC_START_PROMPT}
     return null;
   }
 
-  async function waitForUserMessage(runId, previousUser, allowDeliveryTimeout = false) {
+  async function waitForUserMessage(runId, previousUser, allowConnectionError = false) {
     const startedAt = Date.now();
     while (state.running && state.runId === runId) {
       await assertRunLocation(runId);
@@ -3545,7 +3547,7 @@ ${LOGIC_START_PROMPT}
       if (snapshotChanged(current, previousUser)) return current;
       // A failed delivery may never produce a new user bubble. Give normal
       // rendering time to catch up, then let Logic Mode inspect the notice.
-      if (allowDeliveryTimeout && Date.now() - startedAt >= ACTIVITY_WINDOW_MS && deliveryTimeoutResponse()) return current;
+      if (allowConnectionError && Date.now() - startedAt >= ACTIVITY_WINDOW_MS && connectionErrorResponse()) return current;
       await sleep(POLL_MS);
     }
 
@@ -3612,12 +3614,13 @@ ${LOGIC_START_PROMPT}
     let stableResponse = null;
     let stableSince = null;
     let manualDraftSeen = false;
+    let connectionErrorSince = null;
 
     // Image/tool turns can look complete before their final narrative arrives.
     // Keep watching after a missing flag, without treating the image itself as
     // permission to send or overriding a human's intervention.
     while (state.running && state.runId === runId) {
-      if (state.paused) stableSince = null;
+      if (state.paused) { stableSince = null; connectionErrorSince = null; }
       if (!await waitForLogicResume(runId)) return null;
       if (window.location.href !== responseUrl) {
         throw new Error("The chat changed while waiting for the final Logic flag. No additional prompt was sent.");
@@ -3630,6 +3633,17 @@ ${LOGIC_START_PROMPT}
       const user = latestMessageSnapshot("user");
       if (snapshotChanged(user, previousUser)) return { userMessage: user };
       manualDraftSeen ||= Boolean(composerText(findComposer()));
+      // A dropped stream can leave a stable partial reply before its error UI
+      // appears. Recover that error instead of waiting forever for a final flag.
+      const connectionError = connectionErrorResponse();
+      if (!manualDraftSeen && connectionError) {
+        connectionErrorSince ??= Date.now();
+        if (Date.now() - connectionErrorSince >= ACTIVITY_WINDOW_MS) return {response:connectionError};
+        stableResponse = null; stableSince = null;
+        await sleep(POLL_MS);
+        continue;
+      }
+      connectionErrorSince = null;
       const current = latestMessageSnapshot("assistant");
       const flag = parseLogicDirective(current.text).flag;
       const canRecover = !manualDraftSeen && !isGenerating()
@@ -3871,8 +3885,8 @@ ${LOGIC_START_PROMPT}
       while (response && state.running && state.runId === runId) {
         if (!await waitForLogicResume(runId)) return;
 
-        if (response.deliveryTimeout) {
-          await recoverDeliveryTimeout(runId, response);
+        if (response.connectionError) {
+          await recoverConnectionError(runId, response);
           return;
         }
 
@@ -4002,7 +4016,8 @@ ${LOGIC_START_PROMPT}
           if (recovery.response) {
             response = recovery.response;
             state.logicPhase = "monitoring";
-            setDetail("The completed Logic flag appeared. Reading the updated response…");
+            setDetail(response.connectionError ? "ChatGPT reported a connection error. Preparing safe reconnection…"
+              : "The completed Logic flag appeared. Reading the updated response…");
             continue;
           }
           const userMessage = recovery.userMessage;

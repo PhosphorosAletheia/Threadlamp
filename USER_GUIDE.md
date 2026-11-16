@@ -36,11 +36,15 @@ disables its schedule; when needed it waits for a free composer and sends a
 shutdown instruction. It does not cancel an answer ChatGPT is already generating.
 Stopping a sleeping chat does not send that shutdown message.
 
-## Delivery timeout recovery
+## Connection error recovery
 
 During an active Logic run, Threadlamp saves a temporary checkpoint for that tab
-and conversation. A delivery-timeout notice triggers a 30-second wait followed
-by at most one reload per run. It never clicks Retry or resends the failed prompt.
+and conversation. A **Message delivery timed out. Please try again.** or
+**Error in message stream** alert with a Retry button triggers a 30-second wait
+followed by at most one reload per run. Threadlamp never clicks Retry or resends
+the interrupted prompt. It also watches for these errors when a partial response
+has left Logic Mode waiting for its final flag. Text quoted inside a chat response
+does not trigger recovery.
 
 After reload, it allows up to 60 seconds for the conversation to load and verifies
 the last user message by its message ID and a hash. It restores the message count
@@ -309,7 +313,8 @@ recent events from that tab, including draft/message lengths, structural checks,
 High-thinking checks, identity-confirmation results, page reload/discard indicators,
 and extension code locations where an error was reported. Handoff confirmation
 retries, handoff trust failures, reconnection trust failures and missing final
-Logic flags have separate diagnostic categories. Rewrite request
+Logic flags have separate diagnostic categories. Recovery records distinguish
+message-stream errors from delivery timeouts. Rewrite request
 lengths, elapsed times, cooldown and error categories are included too. No rewrite
 text is logged.
 Message text, queued instructions, replies, titles, full URLs, and credentials are

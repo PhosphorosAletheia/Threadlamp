@@ -89,6 +89,7 @@
     "tests/lan-helper.test.js",
     "tests/lan-worker.test.js",
     "tests/late-logic-flag.test.js",
+    "tests/message-stream.test.js",
     "tests/popup-heartbeat.test.js",
     "tests/popup-server-link.test.js",
     "tests/queue-storage.test.js",

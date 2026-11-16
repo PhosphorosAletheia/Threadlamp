@@ -85,7 +85,7 @@ async function runTests() {
   let f = fixture();
   let reloads = 0;
   f.window.location.reload = () => { reloads++; };
-  assert.equal(f.api.findDeliveryTimeoutNotice(), f.notice);
+  assert.equal(f.api.findConnectionErrorNotice(), f.notice);
   await f.run();
   assert.equal(reloads, 1);
   assert.deepEqual(f.writes, [], "reconnection never writes or resends a prompt");
@@ -100,8 +100,8 @@ async function runTests() {
   f.api.setTimeoutSnapshotsForTest(() => ({ element: null, text: "" }));
   f.setSelector("#prompt-textarea", []);
   f.window.location.reload = () => { reloads++; };
-  assert.equal(f.api.findDeliveryTimeoutNotice(), f.notice, "captured empty-page timeout is recognized");
-  await f.api.recoverDeliveryTimeout(1, f.api.deliveryTimeoutResponse());
+  assert.equal(f.api.findConnectionErrorNotice(), f.notice, "captured empty-page timeout is recognized");
+  await f.api.recoverConnectionError(1, f.api.connectionErrorResponse());
   assert.equal(reloads, 2, "empty page reloads using the earlier checkpoint");
 
   for (const change of ["draft", "queued", "second-timeout", "no-checkpoint", "storage-failure"]) {
@@ -130,7 +130,7 @@ async function runTests() {
       const retry = Object.assign(visibleElement("Retry"), { parentElement: { ...f.notice } });
       f.setSelector("button, [role='button']", [f.retry, retry]);
     }
-    assert.equal(f.api.findDeliveryTimeoutNotice(), null, change);
+    assert.equal(f.api.findConnectionErrorNotice(), null, change);
   }
   for (const change of ["stop", "navigate", "draft", "notice-disappeared", "busy"]) {
     f = fixture();

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.17.2 beta 1
+
+- Recover from ChatGPT’s “Error in message stream” alert using the same guarded, single reload as delivery timeouts. Never click Retry or resend the interrupted prompt.
+- Detect a stream error that appears after a partial reply has already entered the missing-Logic-flag wait. Preserve manual typing and pauses.
+- Verify the saved user message after reload, then monitor ongoing work or process the completed Logic flag. Another error pauses automation and reports it without another reload.
+- Record message-stream recovery as a distinct private diagnostic category. Restart the LAN helper to retain the new category.
+
 ## 1.17.1 beta 1
 
 - Recover handoff confirmation when ChatGPT saves a new conversation while sender verification is in progress. Retry only an explicitly rejected confirmation, with fresh chat-ownership checks and at most three attempts; never resend the startup prompt or retry an uncertain result.
