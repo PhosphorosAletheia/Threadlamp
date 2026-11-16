@@ -29,9 +29,12 @@ globalThis.ThreadlampQueueStore = class {
     throw Object.assign(new Error("The chat kept changing while restoring its queue. Wait for the destination to settle and reload before resuming."),
       {queueOperation:"Q_LOAD",queueFailure:"route"});
   }
+  close() {this.closed = true; this.onLoad = this.onError = () => {};}
   async request(type, extra = {}) {
+    if (this.closed) throw new Error("The old queue controller has stopped.");
     const result = await chrome.runtime.sendMessage({type, url:this.url, version:this.version, ...extra});
     if (!result?.ok || !Number.isInteger(result.version) || !Array.isArray(result.items)) throw Object.assign(new Error(result?.error || "The queue could not be saved. Reload the chat before resuming."), {queueOperation:type,queueFailure:result?.queueFailure || "storage"});
+    if (this.closed) throw new Error("The old queue controller has stopped.");
     this.version = result.version; return result;
   }
   enqueue(work) {

@@ -110,8 +110,10 @@ reloading the extension is unnecessary for a helper-only update.
   stop the helper with Ctrl+C. Disabling preserves the saved pairing token.
 - If a command times out or disconnects, inspect the agent before retrying. The
   helper does not queue commands while offline or replay uncertain commands.
-- Reloading the extension can invalidate already-open chat controls. Follow the
-  normal extension update procedure; the helper does not reload chat pages.
+- From 1.17.0, extension reloads reattach chat controls without refreshing the
+  conversations and pause automation for review. Older tabs need one safe refresh.
+  Follow the [extension update instructions](USER_GUIDE.md#update-backups-and-removal);
+  the helper does not reload chat pages.
 - Setup refuses to overwrite existing credentials. To rotate keys, stop the
   helper and initialize a new private directory using `--dir <new-directory>`.
   Start with that same `--dir`, update the extension pairing, and use the new

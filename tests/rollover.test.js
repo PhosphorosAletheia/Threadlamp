@@ -313,7 +313,7 @@ function contentHarness(timing = {}) {
   vm.runInContext(fs.readFileSync(path.join(root, "server-link.js"), "utf8"), context, { filename: "server-link.js" });
   // Exercise transitions explicitly, without the startup claim racing the fixtures.
   const source = exposeContentFunctions(fs.readFileSync(path.join(root, "content.js"), "utf8"))
-    .replace(/  void queueStore.ready.then\(\(\) => restoreLogicReconnect\(\)\).then\(\(\) => \{[\s\S]*?\n  \}\).catch\(\(\) => \{\}\);/, "");
+    .replace(/  void queueStore.ready.then\([^\n]+\).then\(\(\) => \{[\s\S]*?\n  \}\).catch\(\(\) => \{\}\);/, "");
   vm.runInContext(source.replace("const restored = await queueStore.handoff(pending.requestId);", "const restored = {items: additionalPrompts};"), context, { filename: "content.js" });
 
   return {

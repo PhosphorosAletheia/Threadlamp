@@ -255,9 +255,25 @@ the underlying submission using its own configured access.
 ## Update, backups and removal
 
 Keep an unpacked extension at the same path and reload its existing entry to
-preserve its identity. Plan reloads after active work finishes. Refresh designated
-ChatGPT tabs when ready to load updated page scripts. Do not run old and beta
-copies against the same conversations at once.
+preserve its identity. From version 1.17.0 onward, reloading or updating the
+extension automatically reattaches controls to loaded ChatGPT tabs without
+refreshing those pages. The conversation can keep generating, and existing
+drafts and saved queues remain in place.
+
+Reattached tabs show **Threadlamp · Paused**. Inspect the latest response and any
+draft, check the follow-up text, turn limit and project-handoff setting, then use
+**Resume** in the popup or **Resume after reload** in the dashboard when ready. This does not resend
+the startup prompt. Interrupted sends and handoffs are never replayed by the
+reattachment process. Enabled heartbeat schedules are paused too; resume a
+schedule separately after reviewing the conversation. Existing manual pauses,
+WAIT timers and run counters are not automatically resumed or reconstructed.
+
+**First upgrade from 1.16.4 or earlier:** refresh each designated chat once when
+safe to install the new shutdown mechanism. Later extension reloads can use
+reattachment. Loading tabs must finish loading; discarded tabs must be opened.
+The popup can retry attachment without refreshing the page. If a tab cannot be
+attached safely, it explains that a manual refresh is needed. Do not run old and
+beta copies of the extension together.
 
 The encrypted settings export includes Home Assistant credentials, loop defaults,
 rollover preference and sound preference. It does **not** back up server bindings,
@@ -310,6 +326,7 @@ When reporting an error, leave the affected chat unchanged and identify the agen
 If the local helper is running, the host report may already have the evidence we
 need. Otherwise, download the report and attach it. Recording cannot reconstruct
 an earlier failure from before this version was loaded, and an invalidated
-extension context cannot send new events until the tab is reloaded. Earlier
+extension context cannot send new events; the reattached controller resumes
+reporting. Older controllers need one safe tab refresh. Earlier
 recorded events remain available. Reports help diagnose a failure; they do not
 prove that a remote task completed or that a message was delivered.

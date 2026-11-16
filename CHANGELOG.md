@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.17.0 beta 1
+
+- Reattach Threadlamp controls to already-open ChatGPT tabs after an extension reload or update, without refreshing the conversation. Shut down old timers, message listeners and controls before replacing them.
+- Preserve saved queues and drafts. Reattached tabs pause automation and enabled heartbeats for review; no prompt or interrupted send is replayed. Use Resume Logic Mode after inspecting the chat and its run settings, and resume its schedule separately when ready.
+- Require one safe page refresh for tabs still running versions before 1.17.0. Loading or discarded tabs may need to finish loading or be opened before controls are available.
+- Avoid retrying popup commands after a missing reply, since delivery may already have succeeded.
+
 ## 1.16.4 beta 1
 
 - Keep queues attached during the new-chat transition from a project landing page through a temporary chat ID to its saved conversation. Preserve queues stored by earlier versions.

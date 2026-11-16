@@ -54,19 +54,10 @@ async function sendToPage(payload) {
     throw new Error("Open a chat at chatgpt.com first.");
   }
 
-  try {
-    return await chrome.tabs.sendMessage(tab.id, payload);
-  } catch {
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["server-link.js", "diagnostics-schema.js", "queue-client.js", "content.js"]
-      });
-      return await chrome.tabs.sendMessage(tab.id, payload);
-    } catch {
-      throw new Error("The extension could not attach to this ChatGPT tab. Reload the page, then try again.");
-    }
-  }
+  const attached = await chrome.runtime.sendMessage({type:"AT_ATTACH", tabId:tab.id});
+  if (!attached?.ok) throw new Error(attached?.error || "Threadlamp could not attach. Refresh this chat only when safe.");
+  // Never retry a command after a missing reply: its send may have succeeded.
+  return chrome.tabs.sendMessage(tab.id, payload, {frameId:0});
 }
 
 async function sendToBackground(payload) {

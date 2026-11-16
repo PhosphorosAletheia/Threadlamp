@@ -15,7 +15,7 @@
     "rewrite_timeout", "rewrite_network", "rewrite_cancelled", "rewrite_rate_limit", "rewrite_access", "rewrite_response", "rewrite_busy", "rewrite_other"]);
   const modes = new Set(["idle", "logic", "loop", "setup"]);
   const phases = new Set(["idle", "starting", "monitoring", "waiting_user", "waiting", "sleeping", "rolling_over",
-    "stopping", "recovery_paused", "reconnecting", "resuming", "arming_heartbeat", "server_setup", "sending"]);
+    "stopping", "update_paused", "recovery_paused", "reconnecting", "resuming", "arming_heartbeat", "server_setup", "sending"]);
   const numbers = ["runId", "count", "limit", "queueCount", "draftLength", "userLength", "userRenderedLength",
     "expectedLength", "paragraphs", "breaks", "searchIdCount", "wrapperTurns", "inputLength", "durationMs",
     "httpStatus", "activeRequests", "requestOrdinal", "cooldownSeconds"];

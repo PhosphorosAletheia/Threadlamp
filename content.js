@@ -9,6 +9,38 @@
   if (window.__chatGptContinueLoopLoaded) return;
   window.__chatGptContinueLoopLoaded = true;
 
+  // This signal is set only by the extension's isolated-world attach worker.
+  const reattached = window.__threadlampReattaching === true;
+  delete window.__threadlampReattaching;
+  let disposed = false;
+  const runtimeId = chrome.runtime.id;
+  const lifecycleTimers = [];
+  function controllerLive() {
+    if (disposed) return false;
+    try { if (runtimeId && chrome.runtime.id !== runtimeId) { disposeController(); return false; } }
+    catch { disposeController(); return false; }
+    return true;
+  }
+  function requireController() {
+    if (!controllerLive()) throw new Error("Threadlamp was updated. Use the reattached controls before sending again.");
+  }
+  function disposeController() {
+    if (disposed) return;
+    disposed = true;
+    state.running = false; state.runId += 1;
+    // Never use stopLogicMode here: it sends a prompt to the conversation.
+    lifecycleTimers.forEach(id => window.clearInterval(id));
+    window.removeEventListener?.("resize", updateQuickActions);
+    window.removeEventListener?.("pagehide", onPageHide);
+    document.removeEventListener?.("threadlamp:detach", disposeController);
+    try { chrome.runtime.onMessage.removeListener?.(onRuntimeMessage); } catch { /* Invalidated context. */ }
+    queueStore.close?.();
+    overlayHost?.remove(); quickActionsHost?.remove();
+    overlayHost = quickActionsHost = null;
+    window.__chatGptContinueLoopLoaded = false;
+  }
+  function onPageHide(event) { recordDiagnostic("page_hidden", {pagePersisted:event.persisted === true}); }
+
   const POLL_MS = 250;
   const READY_STABLE_MS = 1250;
   const ACTIVITY_WINDOW_MS = 6000;
@@ -137,6 +169,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     return ThreadlampDiagnosticSchema.snapshot({...result, ...extra});
   }
   function recordDiagnostic(event, extra = {}) {
+    if (!controllerLive()) return;
     if (typeof ThreadlampDiagnosticSchema === "undefined") return;
     try {
       const frames = event === "error" || event === "identity_rejected" ? String(new Error().stack || "").split("\n").flatMap(line => {
@@ -376,6 +409,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
         return null;
       }
       reconnectAttempted = true;
+      requireController();
       window.location.reload();
       return null;
     } catch (error) {
@@ -389,7 +423,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     const url = window.location.href, priorRun = state.runId;
     try {
       const result = await reconnectMessage("LR_CLAIM");
-      if (!result?.ok || !result.record || state.running || state.runId !== priorRun || window.location.href !== url) return;
+      if (!controllerLive() || !result?.ok || !result.record || state.running || state.runId !== priorRun || window.location.href !== url) return;
       const record = result.record;
       reconnectToken = record.token; reconnectCheckpoint = record.settings;
       reconnectAttempted = Boolean(record.attempted);
@@ -1055,6 +1089,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function publishDashboardStatus() {
+    if (!controllerLive()) return;
     // No prompt queue or transcript is written to the persistent activity log.
     const snapshot = { ...publicStatus(), projectTitle: dashboardProjectTitle(), instanceId: heartbeatInstanceId, url: window.location.href.split(/[?#]/)[0] };
     const fingerprint = JSON.stringify(snapshot);
@@ -1088,6 +1123,7 @@ ${LOGIC_START_PROMPT}
       if (!await waitForCondition(() => buttonIsEnabled(findSendButton()), SEND_ENABLE_TIMEOUT_MS)) throw new Error("Send did not become available. The draft was preserved.");
       guard(text);
       attempted = true;
+      requireController();
       findSendButton().click();
       const confirmed = await waitForCondition(() => {
         const user = latestMessageSnapshot("user");
@@ -1149,6 +1185,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function syncHeartbeat() {
+    if (!controllerLive()) return;
     if (serverSetup) return;
     if (!heartbeatSchedule?.enabled) return;
     const phase = !state.running || state.error || state.logicPhase === "waiting_user" || state.logicPhase === "stopping"
@@ -1219,6 +1256,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function configureHeartbeat(schedule) {
+    if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
     heartbeatSchedule = schedule;
     heartbeatFingerprint = "";
     if (!schedule?.enabled) {
@@ -1262,6 +1300,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function checkSleepingActivity() {
+    if (!controllerLive()) return;
     if (state.logicPhase !== "sleeping" || !state.running || state.paused) return;
     if (!heartbeatMatchesLocation()) {
       state.runId += 1; state.running = false; state.mode = "idle"; state.logicPhase = "idle";
@@ -1321,6 +1360,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function acceptHeartbeat(request) {
+    if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
     if (serverSetup) return { accepted: false, busy: true };
     const schedule = request.schedule;
     if (!heartbeatSchedule?.enabled || heartbeatSchedule.id !== schedule?.id || ["paused", "blocked", "disabled", "awaiting_idle"].includes(heartbeatSchedule.phase)) return { accepted: false, detail: "The heartbeat is disabled or paused in this tab." };
@@ -1346,6 +1386,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function resumeHeartbeatLocally(schedule) {
+    if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
     if (state.paused && state.logicPhase !== "sleeping") return { accepted: false, detail: "Resume Logic Mode's manual pause first." };
     if (state.logicPhase === "waiting_user") return { accepted: false, detail: "Answer the agent's request before resuming its schedule." };
     const problem = heartbeatWakeProblem(schedule);
@@ -1358,9 +1399,19 @@ ${LOGIC_START_PROMPT}
   async function attachHeartbeat() {
     try {
       const result = await heartbeatMessage("HB_ATTACH");
+      if (!controllerLive()) return;
       if (result?.schedule) {
+        if (state.logicPhase === "update_paused") {
+          heartbeatSchedule = result.schedule;
+          if (heartbeatSchedule.enabled) {
+            const paused = await heartbeatMessage("HB_STATE", {phase:"paused", detail:state.detail});
+            if (controllerLive() && state.logicPhase === "update_paused" && paused?.schedule) heartbeatSchedule = paused.schedule;
+          }
+          if (controllerLive()) {updateOverlay(); publishDashboardStatus();}
+          return;
+        }
         const deadline = Date.now() + 15000;
-        while (Date.now() < deadline && (!findComposer() || (!result.schedule.initialCycle && !latestMessageSnapshot("assistant").element))) await sleep(POLL_MS);
+        while (controllerLive() && Date.now() < deadline && (!findComposer() || (!result.schedule.initialCycle && !latestMessageSnapshot("assistant").element))) await sleep(POLL_MS);
         const attached = configureHeartbeat(result.schedule);
         if (attached.blocked) {
           state.detail = attached.detail;
@@ -1393,6 +1444,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function acceptServerWake(request) {
+    if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
     if (serverInputWait?.runId === state.runId && state.running && state.mode === "logic"
       && state.logicPhase === "waiting_user" && !state.paused && !state.error && !serverSetup
       && request.url === serverInputWait.url.split(/[?#]/)[0]
@@ -1418,6 +1470,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function startServerSetup(request) {
+    if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
     if (serverSetup || state.paused || (state.error && state.logicPhase !== "server_setup_failed") || isGenerating() || composerText(findComposer())
       || hasMaximumLengthNotice() || !findComposer() || state.logicPhase === "waiting_user"
       || (!request.recovering && parseLogicDirective(latestMessageSnapshot("assistant").text).flag === "user_input")
@@ -1570,6 +1623,7 @@ ${LOGIC_START_PROMPT}
   }
 
   async function requestHomeAssistantNotification(brief, previousUser) {
+    if (!controllerLive()) return {ok:false, enabled:false};
     const latestUser = latestMessageSnapshot("user");
     if (snapshotChanged(latestUser, previousUser) || composerText(findComposer())) {
       return { ok: true, enabled: false, skipped: true };
@@ -1602,6 +1656,7 @@ ${LOGIC_START_PROMPT}
   }
 
   async function requestWorkstationAlert(type = "ALERT_PLAY_USER_INPUT") {
+    if (!controllerLive()) return {ok:false, enabled:false};
     try {
       const result = await chrome.runtime.sendMessage({ type });
       return result?.ok === false
@@ -1616,6 +1671,7 @@ ${LOGIC_START_PROMPT}
   }
 
   async function requestHomeAssistantRolloverFailure(detail, context = {}) {
+    if (!controllerLive()) return {ok:false, enabled:false};
     try {
       const result = await chrome.runtime.sendMessage({
         type: "HA_NOTIFY_ROLLOVER_FAILURE",
@@ -1636,6 +1692,7 @@ ${LOGIC_START_PROMPT}
   }
 
   async function requestHomeAssistantError(detail, fallbackTitle = "") {
+    if (!controllerLive()) return {ok:false, enabled:false};
     const runId = state.runId;
     let result;
     try {
@@ -1768,7 +1825,7 @@ ${LOGIC_START_PROMPT}
     // input to the new run. Rebuild solely from the verified source record.
     const check = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_CHECK", requestId: pending.requestId });
     if (!check?.ok) throw new Error(check?.error || "The handoff expired or was cancelled. The draft was preserved.");
-    if (state.runId !== entryRunId) return false;
+    if (!controllerLive() || state.runId !== entryRunId) return false;
     if (window.location.href !== destinationUrl || !destinationMatchesProject(pending?.projectSegment)
       || rolloverDestinationHasMessages() || isGenerating()
       || findComposer() !== composer || composerText(composer) !== carriedDraft) {
@@ -1822,14 +1879,14 @@ ${LOGIC_START_PROMPT}
       let projectSegment = "";
       let selectedProjectName = "";
 
-      while (!state.running && !hasMaximumLengthNotice() && Date.now() < deadline) {
+      while (controllerLive() && !state.running && !hasMaximumLengthNotice() && Date.now() < deadline) {
         projectSegment = projectSegmentFromLocation();
         selectedProjectName = selectedProjectNameFromPage();
         if ((projectSegment || selectedProjectName) && findComposer()) break;
         await sleep(POLL_MS);
       }
 
-      if (state.running || hasMaximumLengthNotice() || !findComposer() || !projectSegment
+      if (!controllerLive() || state.running || hasMaximumLengthNotice() || !findComposer() || !projectSegment
         || rolloverDestinationHasMessages()) {
         return;
       }
@@ -1942,6 +1999,7 @@ ${LOGIC_START_PROMPT}
       }
 
       setDetail(`Opening a new chat in the same project for “${previousTitle}”…`);
+      requireController();
       verifiedAction.element.click();
 
       const deadline = Date.now() + LOGIC_ROLLOVER_TRANSITION_TIMEOUT_MS;
@@ -2257,6 +2315,7 @@ ${LOGIC_START_PROMPT}
     if (thinkingControlShowsHigh(control)) { recordDiagnostic("thinking_verified", {highThinking:true}); return true; }
 
     setDetail("Selecting High thinking for the new chat…");
+    requireController();
     control.click();
     let menu;
     const opened = await waitWhileCurrent(runId, () => {
@@ -2294,7 +2353,10 @@ ${LOGIC_START_PROMPT}
           current.slider.dispatchEvent(new KeyboardEvent("keyup", { key: "End", code: "End", bubbles: true, cancelable: true }));
         }
       }
-    } else if (!selected(options[0])) options[0].click();
+    } else if (!selected(options[0])) {
+      requireController();
+      options[0].click();
+    }
 
     const verified = await waitWhileCurrent(runId, () => {
       assertUnchanged();
@@ -2341,6 +2403,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function setDetail(detail, error = false, retainNotice = false) {
+    if (!controllerLive()) return;
     const diagnosticKey = [state.mode, state.logicPhase, state.running, state.paused, error].join(":");
     if (error || diagnosticKey !== diagnosticState) {
       diagnosticState = diagnosticKey;
@@ -2382,10 +2445,12 @@ ${LOGIC_START_PROMPT}
   }
 
   const queueStore = new ThreadlampQueueStore(items => {
+    if (!controllerLive()) return;
     queuedPrompts = items;
     queuedPromptNote = items.length ? "Saved queue restored. Resume Logic Mode when ready." : "";
     updateOverlay(); publishDashboardStatus();
   }, error => {
+    if (!controllerLive()) return;
     state.running = false; state.error = true; state.runId += 1;
     recordDiagnostic("queue_error", {reason:"queue_storage", queueOperation:error.queueOperation, queueFailure:error.queueFailure});
     setDetail(`Queue storage error: ${error.message}`, true, true);
@@ -2497,6 +2562,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function createOverlay() {
+    if (!controllerLive()) return;
     if (overlayHost?.isConnected) return;
 
     promptControlsExpanded = false;
@@ -2642,6 +2708,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function updateOverlay() {
+    if (!controllerLive()) return;
     const idleCycle = isIdleLogicCycle();
     if (!state.running && !queuedPrompts[0] && !idleCycle && !terminalNotice) {
       overlayHost?.remove();
@@ -2655,7 +2722,7 @@ ${LOGIC_START_PROMPT}
     const timer = overlayHost.shadowRoot.querySelector(".timer");
     const pauseButton = overlayHost.shadowRoot.querySelector(".pause");
     const label = state.mode === "setup" ? "Server setup" : state.mode === "logic" || queuedPrompts[0] ? "Logic mode" : "Continue loop";
-    headline.textContent = terminalNotice ? (state.logicPhase === "recovery_paused" ? "Threadlamp · Paused" : "Threadlamp · Stopped") : `${label}${idleCycle ? " · Idle" : ""} · ${state.count}/${state.limit}`;
+    headline.textContent = terminalNotice ? (["recovery_paused", "update_paused"].includes(state.logicPhase) ? "Threadlamp · Paused" : "Threadlamp · Stopped") : `${label}${idleCycle ? " · Idle" : ""} · ${state.count}/${state.limit}`;
     overlayHost.shadowRoot.querySelector(".dismiss").hidden = !terminalNotice;
     detail.textContent = state.detail;
 
@@ -2682,6 +2749,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function createQuickActions() {
+    if (!controllerLive()) return;
     if (quickActionsHost?.isConnected) return;
 
     quickActionsHost = document.createElement("div");
@@ -2776,6 +2844,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function updateQuickActions() {
+    if (!controllerLive()) return;
     if (!state.running && !queuedPromptInFlight && queueStore.loaded && !queueStore.error
       && queueStore.url && queueStore.url !== window.location.href
       && /\/c\/[^/]+|\/g\/g-p-[a-f0-9]{32}|^\/$/i.test(window.location.pathname)) void queueStore.attach();
@@ -2828,7 +2897,7 @@ ${LOGIC_START_PROMPT}
 
   async function waitForCondition(predicate, timeoutMs) {
     const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
+    while (controllerLive() && Date.now() - startedAt < timeoutMs) {
       if (predicate()) return true;
       await sleep(POLL_MS);
     }
@@ -2869,6 +2938,7 @@ ${LOGIC_START_PROMPT}
         throw new Error("The chat or draft changed while preparing the quick prompt. No message was sent.");
       }
       recordDiagnostic("send_attempt", {expectedLength:prompt.length, draftMatchesExpected:composerDraftMatches(findComposer(), prompt)});
+      requireController();
       sendButton.click();
 
       const accepted = await waitForCondition(
@@ -2902,6 +2972,7 @@ ${LOGIC_START_PROMPT}
   }
 
   async function assertRunLocation(runId) {
+    requireController();
     const owner = runOwnership;
     if (!owner || owner.runId !== runId) return;
     const submitted = owner.submitted;
@@ -3041,6 +3112,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function writeToComposer(composer, text) {
+    if (!controllerLive()) return false;
     composer.focus();
 
     if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
@@ -3086,6 +3158,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function clearComposer(composer) {
+    if (!controllerLive()) return false;
     if (!composer) return false;
     composer.focus();
 
@@ -3253,6 +3326,7 @@ ${LOGIC_START_PROMPT}
       serverSendAttempted = Boolean(serverLease);
       if (runOwnership?.runId === runId) runOwnership.submitted = { text, before: serverUser, deadline: Date.now() + SEND_ENABLE_TIMEOUT_MS };
       recordDiagnostic("send_attempt", {expectedLength:text.length, draftMatchesExpected:composerDraftMatches(findComposer(), text)});
+      requireController();
       sendButton.click();
 
       const accepted = await waitWhileCurrent(
@@ -4036,6 +4110,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function startLoop(message, limit) {
+    if (!controllerLive()) return publicStatus();
     if (state.running || reconnectRestoring) return publicStatus();
     if (queueStore.url && queueStore.url !== window.location.href) void queueStore.attach();
 
@@ -4085,6 +4160,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function startLogicMode(message, limit, rolloverEnabled = false) {
+    if (!controllerLive()) return publicStatus();
     if (state.running || reconnectRestoring) return publicStatus();
     if (queueStore.url && queueStore.url !== window.location.href) void queueStore.attach();
 
@@ -4129,6 +4205,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function resumeLogicMode(message, limit, rolloverEnabled = false) {
+    if (!controllerLive()) return publicStatus();
     if (state.running || reconnectRestoring) return publicStatus();
     if (queueStore.url && queueStore.url !== window.location.href) void queueStore.attach();
 
@@ -4173,6 +4250,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function stopLogicMode() {
+    if (!controllerLive()) return publicStatus();
     queuedPromptNote = queuedPrompts.length ? "Queue preserved while Logic Mode is stopped." : "";
     disableHeartbeat();
     if (!state.running && state.mode === "logic" && state.logicPhase === "idle") {
@@ -4189,7 +4267,7 @@ ${LOGIC_START_PROMPT}
       return publicStatus();
     }
     if (state.mode !== "logic") return publicStatus();
-    if (["reconnecting", "recovery_paused"].includes(state.logicPhase)) {
+    if (["reconnecting", "recovery_paused", "update_paused"].includes(state.logicPhase)) {
       state.runId += 1; state.running = false; state.paused = false;
       state.mode = "idle"; state.logicPhase = "idle";
       setDetail("Reconnection cancelled. No prompt was sent.", false, true);
@@ -4222,6 +4300,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function toggleLogicPause() {
+    if (!controllerLive()) return publicStatus();
     if (
       state.mode !== "logic"
       || !state.running
@@ -4311,6 +4390,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function stopLoop() {
+    if (!controllerLive()) return publicStatus();
     if (serverSetup) {
       void serverMessage("SL_FAIL", { setupId: serverSetup.setupId }).catch(() => {});
       serverSetup = null;
@@ -4335,7 +4415,12 @@ ${LOGIC_START_PROMPT}
     return publicStatus();
   }
 
-  chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  function onRuntimeMessage(request, _sender, sendResponse) {
+    if (!controllerLive()) return;
+    if (request?.type === "AT_PING") {
+      if (_sender?.id !== chrome.runtime.id) return;
+      sendResponse({ok:true, version:chrome.runtime.getManifest().version, lifecycle:1}); return;
+    }
     if (["DB_SNAPSHOT", "DB_EXECUTE"].includes(request?.type)) {
       if (_sender?.id !== chrome.runtime.id) { sendResponse({ ok: false, error: "Untrusted dashboard request." }); return; }
       if (request.type === "DB_SNAPSHOT") { sendResponse(dashboardSnapshot()); return; }
@@ -4397,24 +4482,43 @@ ${LOGIC_START_PROMPT}
     if (request?.type === "STOP") {
       sendResponse(stopLoop());
     }
-  });
+  }
+  chrome.runtime.onMessage.addListener(onRuntimeMessage);
+  document.addEventListener?.("threadlamp:detach", disposeController);
+  // The marker contains no run state or authority to start automation. Page
+  // events can only shut this controller down, never start or restore a run.
+  if (document.getElementById) {
+    document.getElementById("threadlamp-controller-lifecycle")?.remove();
+    const marker = document.createElement("meta");
+    marker.id = "threadlamp-controller-lifecycle";
+    document.documentElement.append(marker);
+  }
+  window.__threadlampController = {dispose:disposeController};
+  if (reattached) {
+    state.mode = "logic"; state.logicPhase = "update_paused"; state.paused = true;
+    state.detail = "Threadlamp reattached after an update. Inspect the last response and any draft, then use Resume in the popup or Resume after reload in the dashboard. No prompt was resent; saved queues are preserved.";
+    terminalNotice = true;
+  }
 
   createQuickActions();
   updateQuickActions();
-  void queueStore.ready.then(() => restoreLogicReconnect()).then(() => {
+  void queueStore.ready.then(() => reattached || !controllerLive() ? null : restoreLogicReconnect()).then(() => {
+    if (!controllerLive()) return;
+    if (reattached) { void attachHeartbeat(); return; }
     void claimPendingLogicRollover();
     void attachHeartbeat();
   }).catch(() => {});
-  window.setInterval(() => { void monitorLogicReconnect().catch(() => {}); }, 1000);
+  lifecycleTimers.push(window.setInterval(() => { if (controllerLive()) void monitorLogicReconnect().catch(() => {}); }, 1000));
   if (typeof ServerLink !== "undefined" && ServerLink.chatKey(window.location.href)) {
     // Detect an abandoned send claim after a page reload without sending a prompt.
     void serverMessage("SL_STATUS").catch(() => {});
   }
-  window.setInterval(checkSleepingActivity, QUICK_ACTION_REFRESH_MS);
-  window.setInterval(updateQuickActions, QUICK_ACTION_REFRESH_MS);
-  window.setInterval(publishDashboardStatus, 1000);
+  lifecycleTimers.push(window.setInterval(checkSleepingActivity, QUICK_ACTION_REFRESH_MS));
+  lifecycleTimers.push(window.setInterval(updateQuickActions, QUICK_ACTION_REFRESH_MS));
+  lifecycleTimers.push(window.setInterval(publishDashboardStatus, 1000));
   window.addEventListener("resize", updateQuickActions, { passive: true });
-  window.addEventListener("pagehide", event => recordDiagnostic("page_hidden", {pagePersisted:event.persisted === true}));
+  window.addEventListener("pagehide", onPageHide);
+  updateOverlay();
   recordDiagnostic("loaded", {pageReload:globalThis.performance?.getEntriesByType?.("navigation")?.[0]?.type === "reload",
     pageDiscarded:document.wasDiscarded === true});
 })();
