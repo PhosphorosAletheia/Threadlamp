@@ -1,7 +1,7 @@
 # Threadlamp privacy notice
 
 Publisher: [Phosphoros Research](https://phosphoros-research.pages.dev/).
-Applies to Threadlamp 1.16.3 beta 1. Updated November 15, 2026.
+Applies to Threadlamp 1.16.4 beta 1. Updated November 15, 2026.
 
 ## Data handled
 
@@ -108,7 +108,7 @@ See [LAN setup](LAN_DASHBOARD.md) for access and retention details.
 Diagnostic recording is enabled by default and can be disabled or cleared from
 Dashboard Settings. It stores only allowlisted metadata: versions, timestamps,
 tab IDs, anonymized project/chat references, automation states, error categories,
-extension code locations, counts, lengths, and boolean check results. Rewrite
+extension code locations, counts, lengths, boolean check results, and allowlisted queue operation/failure categories. Rewrite
 request metadata includes elapsed time, input length, cooldown and categorized
 errors; provider response bodies are excluded. Earlier summary-request metadata
 may remain until diagnostics are cleared or expire. It excludes

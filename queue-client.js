@@ -11,14 +11,27 @@ globalThis.ThreadlampQueueStore = class {
       if (!/\/c\/[^/]+|\/g\/g-p-[a-f0-9]{32}|^\/$/i.test(new URL(this.url).pathname)) {
         this.loaded = true; return;
       }
-      const result = await this.request("Q_LOAD");
-      if (window.location.href !== this.url) throw new Error("The chat changed while restoring its queue. Reload the destination before resuming.");
-      this.loaded = true; onLoad(result.items.map(item => ({...item, url:this.url})));
+      await this.loadCurrent();
     });
+  }
+  async loadCurrent() {
+    // Reads are safe to repeat when ChatGPT changes its route during startup.
+    // Never apply the old page's queue, and never retry mutations this way.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const destination = window.location.href;
+      this.url = destination;
+      let result;
+      try {result = await this.request("Q_LOAD");}
+      catch (error) {if (window.location.href !== destination) continue; throw error;}
+      if (window.location.href !== destination) continue;
+      this.loaded = true; this.onLoad(result.items.map(item => ({...item, url:destination}))); return;
+    }
+    throw Object.assign(new Error("The chat kept changing while restoring its queue. Wait for the destination to settle and reload before resuming."),
+      {queueOperation:"Q_LOAD",queueFailure:"route"});
   }
   async request(type, extra = {}) {
     const result = await chrome.runtime.sendMessage({type, url:this.url, version:this.version, ...extra});
-    if (!result?.ok || !Number.isInteger(result.version) || !Array.isArray(result.items)) throw new Error(result?.error || "The queue could not be saved. Reload the chat before resuming.");
+    if (!result?.ok || !Number.isInteger(result.version) || !Array.isArray(result.items)) throw Object.assign(new Error(result?.error || "The queue could not be saved. Reload the chat before resuming."), {queueOperation:type,queueFailure:result?.queueFailure || "storage"});
     this.version = result.version; return result;
   }
   enqueue(work) {
@@ -32,12 +45,7 @@ globalThis.ThreadlampQueueStore = class {
     const destination = window.location.href;
     if (!this.loaded || this.error || destination === this.url) return this.chain;
     this.loaded = false;
-    return this.enqueue(async () => {
-      this.url = destination;
-      const result = await this.request("Q_LOAD");
-      if (window.location.href !== destination) throw new Error("The chat changed while restoring its queue. Reload before resuming.");
-      this.loaded = true; this.onLoad(result.items.map(item => ({...item, url:destination})));
-    });
+    return this.enqueue(() => this.loadCurrent());
   }
   save(items) {
     const url = window.location.href, snapshot = items.map(({id,text}) => ({id,text}));

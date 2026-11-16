@@ -53,7 +53,7 @@
       const last = data.events.at(-1);
       if (last && now-last.at < 2000 && JSON.stringify({...last,at:0}) === JSON.stringify({...item,at:0})) return {ok:true};
       data.events.push(item); data.events = data.events.slice(-400);
-      if (item.event === "error" || item.event === "identity_rejected" || item.event === "summary_error") {
+      if (item.event === "error" || item.event === "identity_rejected" || item.event === "summary_error" || item.event === "queue_error") {
         data.incidents.push({at:now, tabId:item.tabId, reason:item.reason,
           events:data.events.filter(e => e.tabId === item.tabId).slice(-40)});
         data.incidents = data.incidents.slice(-20);

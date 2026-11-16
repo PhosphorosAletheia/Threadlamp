@@ -118,3 +118,95 @@ test("manual navigation restores the destination queue without transferring the 
   h.tabs.get(17).url=c.context.window.location.href=sourceUrl;
   await c.store.attach();assert.equal(c.restored[0].text,message.text);
 });
+
+test("handoff queues follow project landing through a temporary ID to the saved chat exactly once",async()=>{
+  for (const temporary of ["local-chatgpt:temporary", "local-chatgpt%3Atemporary", "local-chatgpt%3atemporary"]) {
+    const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project");
+    h.tabs.get(17).url=home;
+    const c=await client(h);await c.store.save([message]);
+    c.context.window.location.href=h.tabs.get(17).url=home.replace(/\/project$/,"/c/"+temporary);
+    await c.store.move();
+    c.context.window.location.href=h.tabs.get(17).url=sourceUrl;
+    await c.store.move();
+    assert.equal((await client(h)).restored[0].text,message.text);
+    h.tabs.get(17).url=home;
+    assert.equal((await req(h,"Q_LOAD")).items.length,0,"landing queue cannot replay transferred messages");
+  }
+});
+
+test("stale sender tab metadata requires exact active-document proof and the live destination",async()=>{
+  const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project");
+  const stale={...sender(h),url:home,tab:{...h.tabs.get(17),url:home},documentId:"current-document",documentLifecycle:"active"};
+  let proof={documentId:"current-document",frameId:0,result:{url:sourceUrl,top:true}};
+  h.context.chrome.scripting={executeScript:async options=>{
+    assert.equal(options.target.tabId,17);assert.equal(options.target.documentIds[0],"current-document");return [proof];
+  }};
+  assert.equal((await h.dispatch({type:"Q_LOAD",url:sourceUrl},stale)).ok,true);
+  const valid=proof;
+  for(const invalid of [{...valid,documentId:"old-document"},{...valid,frameId:1},
+    {...valid,result:{url:home,top:true}},{...valid,result:{url:sourceUrl,top:false}}]) {
+    proof=invalid;
+    assert.equal((await h.dispatch({type:"Q_SAVE",url:sourceUrl,version:0,items:[message]},stale)).ok,false);
+  }
+  proof=valid;
+  for(const invalid of [{...stale,documentId:undefined},{...stale,documentLifecycle:"cached"},
+    {...stale,id:"foreign-extension"},{...stale,frameId:1}]) {
+    assert.equal((await h.dispatch({type:"Q_SAVE",url:sourceUrl,version:0,items:[message]},invalid)).ok,false);
+  }
+  h.tabs.get(17).url=sourceUrl+"-other-chat";
+  assert.equal((await h.dispatch({type:"Q_SAVE",url:sourceUrl,version:0,items:[message]},stale)).ok,false);
+  assert.equal(h.local.values[KEY],undefined,"failed checks never mutate queues");
+});
+
+test("initial queue read follows navigation without applying an obsolete queue or retrying a write",async()=>{
+  const home=sourceUrl.replace(/\/c\/source$/,"/project"),calls=[],loaded=[];
+  const context={URL,Promise,window:{location:{href:home}},chrome:{runtime:{sendMessage:async r=>{
+    calls.push(r);
+    if(calls.length===1){context.window.location.href=sourceUrl;return {ok:false,error:"The queue's chat changed."};}
+    return {ok:true,version:3,items:[message]};
+  }}}};
+  vm.createContext(context);vm.runInContext(fs.readFileSync(require.resolve("../queue-client.js"),"utf8"),context);
+  const store=new context.ThreadlampQueueStore(items=>loaded.push(items),()=>{});await store.ready;
+  assert.equal(calls.length,2);assert.ok(calls.every(r=>r.type==="Q_LOAD"));
+  assert.equal(store.url,sourceUrl);assert.equal(loaded.length,1);assert.equal(loaded[0][0].url,sourceUrl);
+});
+
+test("upgrading preserves a legacy temporary-ID queue and refuses to merge conflicting queues",async()=>{
+  const project="g-p-0123456789abcdef0123456789abcdef",temporary="local-chatgpt%3Atemporary";
+  const oldKey=JSON.stringify(["https://chatgpt.com",project,"chat",temporary]);
+  const tabKey=JSON.stringify(["https://chatgpt.com",project,"tab",17]);
+  const initial={[KEY]:{[oldKey]:{version:4,items:[message]}}};
+  const h=await harness(initial);h.tabs.get(17).url=sourceUrl.replace(/\/c\/source$/,"/c/"+temporary);
+  const c=await client(h);assert.equal(c.restored[0].text,message.text);
+  c.context.window.location.href=h.tabs.get(17).url=sourceUrl;
+  await c.store.move();assert.equal((await client(h)).restored[0].text,message.text);
+  assert.equal(h.local.values[KEY][oldKey].items.length,0);
+  const conflict=await harness({[KEY]:{[oldKey]:{version:4,items:[message]},[tabKey]:{version:2,items:[{id:"other",text:"Keep separate"}]}}});
+  conflict.tabs.get(17).url=sourceUrl.replace(/\/c\/source$/,"/c/"+temporary);
+  const before=JSON.stringify(conflict.local.values[KEY]);
+  assert.equal((await req(conflict,"Q_LOAD")).ok,false);
+  assert.equal(JSON.stringify(conflict.local.values[KEY]),before);
+});
+
+test("real Logic ownership and durable queue survive both new-chat URL transitions without resending startup",async()=>{
+  const {fixture}=require("./delivery-timeout.test.js");
+  const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project"),temporary=home.replace(/\/project$/,"/c/local-chatgpt%3Atemporary");
+  let f,store;
+  const context={URL,Promise,window:{get location(){return f?.window.location || new URL(home);}},
+    chrome:{runtime:{sendMessage:r=>{h.tabs.get(17).url=context.window.location.href;return h.dispatch(r,sender(h));}}}};
+  vm.createContext(context);vm.runInContext(fs.readFileSync(require.resolve("../queue-client.js"),"utf8"),context);
+  class Store extends context.ThreadlampQueueStore {
+    constructor(...args){super(...args);store=this;}
+    async move(){await super.move();if(this.url===temporary)f.onTick(()=>{f.window.location=new URL(sourceUrl);});}
+  }
+  f=fixture(["continue","idle"],{QueueStore:Store});f.hide();f.window.location=new URL(home);await store.ready;
+  f.api.setTimeoutSnapshotsForTest(role=>{
+    if(!f.sends.length)return {element:null,text:""};
+    const element=role==="user"?f.user():f.assistant();return {element,text:element.textContent};
+  });
+  const send=f.send.click;f.send.click=()=>{send();if(f.sends.length===1)f.window.location=new URL(temporary);};
+  await f.api.runLogicMode(1,false,"Initial continuation");
+  assert.equal(f.api.state.error,false,f.api.state.detail);
+  assert.deepEqual(f.sends,["Initial continuation","Configured followup"]);
+  assert.equal(store.url,sourceUrl);
+});

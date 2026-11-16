@@ -100,3 +100,14 @@ test("helper writes only sanitized bounded reports with private permissions",asy
   await assert.rejects(saveReport(linked,report),/private/);
   assert.equal(fs.readdirSync(dir).length,1);
 });
+
+test("queue failures retain only allowlisted operation and verification categories",async()=>{
+  const h=worker();
+  await h.dispatch(event("queue_error",{reason:"queue_storage",queueOperation:"Q_MOVE",queueFailure:"route"}),h.sender());
+  const report=(await h.dispatch({type:"DG_EXPORT"})).report;
+  assert.equal(report.incidents.length,1);
+  assert.equal(report.events[0].queueOperation,"Q_MOVE");
+  assert.equal(report.events[0].queueFailure,"route");
+  const rejected=schema.snapshot({event:"queue_error",queueOperation:"PRIVATE_URL",queueFailure:"PRIVATE_DRAFT"});
+  assert.equal(JSON.stringify(rejected).includes("PRIVATE"),false);
+});

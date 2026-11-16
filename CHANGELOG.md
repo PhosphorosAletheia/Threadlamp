@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.16.4 beta 1
+
+- Keep queues attached during the new-chat transition from a project landing page through a temporary chat ID to its saved conversation. Preserve queues stored by earlier versions.
+- Verify the exact active browser document when sender URL metadata lags behind navigation; different chats, projects and replaced documents remain blocked.
+- Retry only the initial queue read if the page changes while it is loading. Queue writes and sends are never automatically retried.
+- Include the queue operation and verification failure category in private diagnostics without message text or URLs. Restart the LAN helper to retain these new diagnostic fields in its local report.
+
 ## 1.16.3 beta 1
 
 - Show agents waiting on a WAIT timer or external operation with a purple bullet. Agents waiting for user input remain yellow.

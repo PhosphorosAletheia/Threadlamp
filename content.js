@@ -2387,6 +2387,7 @@ ${LOGIC_START_PROMPT}
     updateOverlay(); publishDashboardStatus();
   }, error => {
     state.running = false; state.error = true; state.runId += 1;
+    recordDiagnostic("queue_error", {reason:"queue_storage", queueOperation:error.queueOperation, queueFailure:error.queueFailure});
     setDetail(`Queue storage error: ${error.message}`, true, true);
   });
   function persistQueue() {return queueStore.save(queuedPrompts);}
