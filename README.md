@@ -6,7 +6,7 @@ A Chrome extension from [Phosphoros Research](https://phosphoros-research.pages.
 Threadlamp brings follow-up controls, a prompt queue, scheduled check-ins, and a
 dashboard for your open ChatGPT conversations into one local workspace.
 
-**Version 1.17.2 beta 1.** Threadlamp uses your existing ChatGPT session and plan
+**Version 1.18.0 beta 1.** Threadlamp uses your existing ChatGPT session and plan
 allowance. No OpenAI API key is required. It is an independent project and is
 not affiliated with, endorsed by, or sponsored by OpenAI.
 
@@ -81,3 +81,7 @@ Source code and documentation are licensed under the [Mozilla Public License
 Copyright (c) 2026 Phosphoros Research and contributors.
 
 ChatGPT and OpenAI are names of their respective owner.
+
+For a manually triggered repair review, run `npm run repair:check` from the source
+checkout. It collects private diagnostic evidence without controlling agents or
+installing updates. See [Manual repair review](docs/REPAIR.md).

@@ -304,6 +304,15 @@ broadcast, control Logic Mode, and manage heartbeats from another device. Setup
 requires the source package and a local Node.js helper. LAN access is off until
 you pair it in extension settings.
 
+## Manual repair review
+
+Ask your coding assistant to **“Run a Threadlamp repair review”**, or run
+`npm run repair:check` from the source checkout to collect the evidence yourself.
+The check reads existing local logs, compares versions and groups recorded errors
+without controlling chats. Repairs remain manually triggered, and you reload
+Threadlamp yourself once a tested update is ready. No scheduled repair monitor
+is enabled by this feature. See [Manual repair review](docs/REPAIR.md).
+
 ## Diagnostics and error reports
 
 Local diagnostics are on by default. Threadlamp records its version, content-script

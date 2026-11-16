@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.18.0 beta 1
+
+- Add `npm run repair:check` for manually triggered repair reviews. Collect a private, sanitized diagnostic snapshot; compare source and runtime versions; group failures without duplicate counts; and flag stale or incomplete evidence.
+- Clearly distinguish historical tab observations from live agent status. Missing or invalid reports fail visibly.
+- Keep software repair and installation manual: the check never edits source, controls chats, reloads the extension or schedules maintenance.
+
 ## 1.17.2 beta 1
 
 - Recover from ChatGPT’s “Error in message stream” alert using the same guarded, single reload as delivery timeouts. Never click Retry or resend the interrupted prompt.
