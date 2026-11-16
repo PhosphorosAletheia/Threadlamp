@@ -7,7 +7,9 @@
   "use strict";
   const KEY = "logicReconnectCheckpoints", TTL = 10 * 60 * 1000;
   let queue = Promise.resolve();
-  const id = value => typeof value === "string" && /^[\w:-]{1,150}$/.test(value);
+  // Older controllers use timestamp-Math.random() IDs and derived run tokens
+  // containing a decimal point. Both are bounded opaque ownership values.
+  const id = value => typeof value === "string" && /^[\w:.-]{1,150}$/.test(value);
   function settings(value) {
     if (!value || typeof value.message !== "string" || !value.message.trim() || value.message.length > 4000
       || !Number.isInteger(value.limit) || value.limit < 1 || value.limit > 1000

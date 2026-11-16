@@ -204,7 +204,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   let quickActionsHost = null;
   let quickActionPending = false;
   let heartbeatSchedule = null;
-  const heartbeatInstanceId = `${Date.now()}-${Math.random()}`;
+  const heartbeatInstanceId = crypto.randomUUID();
   let heartbeatFingerprint = "";
   let heartbeatBaselineUser = null;
   let manualHeartbeatCycle = false;

@@ -6,11 +6,27 @@
 "use strict";
 const assert = require("node:assert/strict");
 const { harness, sourceUrl } = require("./heartbeat.test.js");
+const { contentHarness } = require("./rollover.test.js");
 (async () => {
   const h = await harness();
   const sender = { id: "test-extension", frameId: 0, url: sourceUrl, tab: h.tabs.get(17) };
   const settings = { message: "Continue", limit: 5, count: 3, userHash: "a".repeat(64), rolloverEnabled: true, verifiedUser: true };
   const req = (type, extra = {}) => ({ type: `LR_${type}`, instanceId: "old-page", url: sourceUrl, token: "run-1", settings, ...extra });
+  const liveInstanceId = contentHarness().api.heartbeatIdentity().instanceId;
+  assert.match(liveInstanceId, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i);
+  for (const instanceId of [liveInstanceId, "1790000000000-0.123456789", "1790000000000-1e-7"]) {
+    const token = `${instanceId}:1`;
+    assert.equal((await h.dispatch(req("SAVE", {instanceId,token}),sender)).ok,true,
+      "real content IDs and pre-update IDs must save a reconnection checkpoint");
+    assert.equal((await h.dispatch(req("PREPARE", {instanceId,token}),sender)).ok,true);
+    const nextInstanceId=contentHarness().api.heartbeatIdentity().instanceId;
+    assert.ok((await h.dispatch(req("CLAIM", {instanceId:nextInstanceId}),sender)).record);
+    await h.dispatch(req("CLEAR", {instanceId:nextInstanceId}),sender);
+  }
+  for (const instanceId of ["", "a".repeat(151), "page/name", "page\nname", "page name"]) {
+    assert.equal((await h.dispatch(req("SAVE", {instanceId}),sender)).ok,false);
+    assert.equal((await h.dispatch(req("SAVE", {token:instanceId}),sender)).ok,false);
+  }
   assert.equal((await h.dispatch(req("SAVE"), { ...sender, frameId: 1 })).ok, false);
   assert.equal((await h.dispatch(req("SAVE"), { ...sender, id: "other-extension" })).ok, false);
   assert.equal((await h.dispatch(req("SAVE", { settings: { ...settings, count: 6 } }), sender)).ok, false);
