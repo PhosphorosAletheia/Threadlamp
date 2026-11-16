@@ -5,6 +5,15 @@ const test = require("node:test"), assert = require("node:assert/strict"), vm = 
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), {webcrypto} = require("node:crypto");
 const schema = require("../diagnostics-schema.js"), {saveReport} = require("../helper/diagnostics.js");
 const {contentHarness, visibleElement} = require("./rollover.test.js");
+test("handoff and reconnection trust failures are distinct from timeouts and missing flags",()=>{
+  assert.equal(schema.reason("Untrusted rollover request."),"handoff_sender");
+  assert.equal(schema.reason("Untrusted reconnection request."),"reconnect_sender");
+  assert.equal(schema.reason("Logic Mode paused: found the latest assistant turn (733 characters) but no valid final flag."),"logic_flag_missing");
+  assert.equal(schema.reason("Message delivery timed out. Please try again."),"delivery_timeout");
+  const report=schema.snapshot({event:"handoff_receipt_retry",reason:"handoff_sender",retryAttempt:1,privateText:"SECRET"});
+  assert.equal(report.event,"handoff_receipt_retry");assert.equal(report.retryAttempt,1);
+  assert.equal(JSON.stringify(report).includes("SECRET"),false);
+});
 function worker(store = {}) {
   let listener, now = 1800000000000;
   class Clock extends Date { static now() { return now; } }

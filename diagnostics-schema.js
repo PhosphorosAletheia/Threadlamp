@@ -4,11 +4,11 @@
 (() => {
   "use strict";
   const events = new Set(["loaded", "state", "error", "handoff_prepare", "handoff_claimed", "handoff_verified",
-    "draft_cleared", "thinking_verified", "prompt_written", "send_attempt", "send_observed", "handoff_complete",
+    "draft_cleared", "thinking_verified", "prompt_written", "send_attempt", "send_observed", "handoff_complete", "handoff_receipt_retry",
     "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored", "page_hidden", "overlay_restored",
     "summary_start", "summary_ready", "summary_error", "summary_skipped", "rewrite_ready", "rewrite_error", "queue_error"]);
   const reasons = new Set(["none", "other", "chat_changed", "project_changed", "draft_changed", "high_thinking",
-    "context_invalidated", "receipt_rejected", "delivery_timeout", "send_unavailable", "handoff_unverified",
+    "context_invalidated", "receipt_rejected", "delivery_timeout", "send_unavailable", "handoff_unverified", "handoff_sender", "reconnect_sender", "logic_flag_missing",
     "notification_failed", "server_error", "conversation_limit", "summary_timeout", "summary_network",
     "summary_cancelled", "summary_response", "summary_rate_limit", "summary_cooldown", "summary_access",
     "summary_http", "summary_busy", "summary_size", "summary_settings", "summary_internal", "queue_storage",
@@ -18,7 +18,7 @@
     "stopping", "update_paused", "recovery_paused", "reconnecting", "resuming", "arming_heartbeat", "server_setup", "sending"]);
   const numbers = ["runId", "count", "limit", "queueCount", "draftLength", "userLength", "userRenderedLength",
     "expectedLength", "paragraphs", "breaks", "searchIdCount", "wrapperTurns", "inputLength", "durationMs",
-    "httpStatus", "activeRequests", "requestOrdinal", "cooldownSeconds"];
+    "httpStatus", "activeRequests", "requestOrdinal", "cooldownSeconds", "retryAttempt"];
   const booleans = ["running", "paused", "hasComposer", "hasUser", "hasAssistant", "generating", "highThinking",
     "hasLegacyId", "hasSearchWrapper", "singleSearchUUID", "sourceProjectMatches", "draftMatchesExpected",
     "draftLooksLikeHandoff", "draftHasQueuedInstructions", "draftSourceProjectMatches", "confirmationExpired",
@@ -32,6 +32,9 @@
     const text = String(value || "").slice(0, 2000);
     for (const [code, pattern] of [
       ["queue_storage", /queue storage error/i],
+      ["handoff_sender", /untrusted rollover request/i],
+      ["reconnect_sender", /untrusted reconnection request/i],
+      ["logic_flag_missing", /no valid final flag/i],
       ["context_invalidated", /extension context invalidated/i], ["chat_changed", /chat changed|left the scheduled conversation/i],
       ["project_changed", /project (?:changed|ID)|same project|same-project/i], ["draft_changed", /draft|message box/i],
       ["high_thinking", /high|thinking/i], ["receipt_rejected", /receipt|handoff.*(?:expired|cancelled)/i],

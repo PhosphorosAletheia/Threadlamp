@@ -97,6 +97,7 @@
     "tests/recovery-diagnostic.test.js",
     "tests/rollover-draft-match-diagnostic.test.js",
     "tests/rollover-draft.test.js",
+    "tests/rollover-receipt.test.js",
     "tests/rollover-variants.test.js",
     "tests/rollover.test.js",
     "tests/routing-security.test.js",

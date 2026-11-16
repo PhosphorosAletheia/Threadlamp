@@ -252,6 +252,15 @@ Only the paired loopback endpoint is supported. The permanent backend credential
 must stay out of chat. Events carry submission identifiers; the agent retrieves
 the underlying submission using its own configured access.
 
+If a new chat already received its continuation but stopped with **Untrusted
+rollover request**, update Threadlamp, inspect the destination and its latest
+response, then use **Resume** in the popup or **Resume after reload** in the
+dashboard. This follows the existing response without sending the startup again.
+Review any heartbeat schedule or server connection separately: a failed handoff
+may have stopped before those connections transferred to the new chat. Version
+1.17.1 retries explicitly rejected confirmations automatically while preserving
+chat-ownership checks. Missing replies and uncertain results still stop for review.
+
 ## Update, backups and removal
 
 Keep an unpacked extension at the same path and reload its existing entry to
@@ -298,7 +307,9 @@ version, event times, anonymized project/chat references, tab identifiers, state
 changes, and the checks around automatic sends and handoffs. Error snapshots keep
 recent events from that tab, including draft/message lengths, structural checks,
 High-thinking checks, identity-confirmation results, page reload/discard indicators,
-and extension code locations where an error was reported. Rewrite request
+and extension code locations where an error was reported. Handoff confirmation
+retries, handoff trust failures, reconnection trust failures and missing final
+Logic flags have separate diagnostic categories. Rewrite request
 lengths, elapsed times, cooldown and error categories are included too. No rewrite
 text is logged.
 Message text, queued instructions, replies, titles, full URLs, and credentials are

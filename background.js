@@ -1315,7 +1315,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       case "LOGIC_ROLLOVER_CHECK":
       case "LOGIC_ROLLOVER_COMPLETE":
-        if (!await isTrustedChatSender(sender)) throw new Error("Untrusted rollover request.");
+        // This rejection precedes all receipt changes and transfers. Only this
+        // explicit response permits the page to retry with fresh sender metadata.
+        if (!await isTrustedChatSender(sender)) return { ok: false,
+          error: "Untrusted rollover request.", code: "ROLLOVER_SENDER_UNTRUSTED" };
         return completeLogicRollover(request, sender);
 
       case "LOGIC_ROLLOVER_CANCEL":

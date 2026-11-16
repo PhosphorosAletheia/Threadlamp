@@ -3039,6 +3039,27 @@ ${LOGIC_START_PROMPT}
     throw new Error("The chat changed from the conversation that started automation. Automatic sending stopped; inspect the chat before resuming.");
   }
 
+  async function confirmRolloverReceipt(runId, requestId) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      requireController();
+      if (!state.running || state.runId !== runId) return null;
+      // Re-prove ownership before every attempt: only the observed first send
+      // may move from an unsaved/temporary route to its saved chat. A different
+      // saved conversation or project must still stop automation.
+      await assertRunLocation(runId);
+      if (!state.running || state.runId !== runId) return null;
+      const receipt = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_COMPLETE", requestId });
+      if (receipt?.ok) return receipt;
+      // Never retry an absent reply, thrown transport error, or a failure after
+      // receipt processing began. This operation never writes or sends a prompt.
+      if (receipt?.code !== "ROLLOVER_SENDER_UNTRUSTED" || attempt === 2) {
+        throw new Error(receipt?.error || "The continuation was sent, but the handoff receipt could not be confirmed. Inspect the new chat.");
+      }
+      recordDiagnostic("handoff_receipt_retry", {reason:"handoff_sender", retryAttempt:attempt + 1});
+      await sleep(POLL_MS);
+    }
+  }
+
   async function waitForLogicResume(runId) {
     await assertRunLocation(runId);
     while (
@@ -3837,10 +3858,8 @@ ${LOGIC_START_PROMPT}
             throw new Error("The continuation could not be verified in the new chat. Inspect it before resuming.");
           }
           if (!state.running || state.runId !== runId) return;
-          await assertRunLocation(runId);
-          if (!state.running || state.runId !== runId) return;
-          const receipt = await chrome.runtime.sendMessage({ type: "LOGIC_ROLLOVER_COMPLETE", requestId: startupFailureContext.failureId });
-          if (!receipt?.ok) throw new Error(receipt?.error || "The continuation was sent, but the handoff receipt could not be confirmed. Inspect the new chat.");
+          const receipt = await confirmRolloverReceipt(runId, startupFailureContext.failureId);
+          if (!receipt || !state.running || state.runId !== runId) return;
           recordDiagnostic("handoff_complete");
           if (receipt.heartbeatSchedule) heartbeatSchedule = receipt.heartbeatSchedule;
           if (receipt.serverLinkTransfer) void bindServerDestination(runId, receipt.serverLinkTransfer, startPrompt);
