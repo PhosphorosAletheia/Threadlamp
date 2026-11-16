@@ -67,6 +67,7 @@ h4 { font-size: 13px; font-weight: 650; }
 .status-dot.stopped { background: #ef4444; }
 .status-dot.paused { background: #3b82f6; }
 .status-dot.sleeping { background: #7dd3fc; }
+.status-dot.external-wait { background: #a855f7; }
 .rewrite-availability { flex-basis: 100%; }
 .rewrite-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 10px; }
 .status-dot.offline { background: #999; }

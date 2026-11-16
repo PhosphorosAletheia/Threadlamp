@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.16.3 beta 1
+
+- Show agents waiting on a WAIT timer or external operation with a purple bullet. Agents waiting for user input remain yellow.
+
 ## 1.16.2 beta 1
 
 - Show sleeping agents with a light blue bullet. Running agents remain green and paused agents remain blue.
