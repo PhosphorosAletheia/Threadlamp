@@ -6,7 +6,7 @@
   const events = new Set(["loaded", "state", "error", "handoff_prepare", "handoff_claimed", "handoff_verified",
     "draft_cleared", "thinking_verified", "prompt_written", "send_attempt", "send_observed", "handoff_complete", "handoff_receipt_retry",
     "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored", "page_hidden", "overlay_restored",
-    "summary_start", "summary_ready", "summary_error", "summary_skipped", "rewrite_ready", "rewrite_error", "queue_error", "queue_move_retry"]);
+    "summary_start", "summary_ready", "summary_error", "summary_skipped", "rewrite_ready", "rewrite_error", "queue_error", "queue_move_retry", "update_restored", "update_resume_blocked"]);
   const reasons = new Set(["none", "other", "chat_changed", "project_changed", "draft_changed", "high_thinking",
     "context_invalidated", "receipt_rejected", "delivery_timeout", "message_stream_error", "send_unavailable", "handoff_unverified", "handoff_sender", "reconnect_sender", "logic_flag_missing",
     "notification_failed", "server_error", "conversation_limit", "summary_timeout", "summary_network",

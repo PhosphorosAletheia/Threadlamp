@@ -275,13 +275,25 @@ extension automatically reattaches controls to loaded ChatGPT tabs without
 refreshing those pages. The conversation can keep generating, and existing
 drafts and saved queues remain in place.
 
-Reattached tabs show **Threadlamp · Paused**. Inspect the latest response and any
-draft, check the follow-up text, turn limit and project-handoff setting, then use
-**Resume** in the popup or **Resume after reload** in the dashboard when ready. This does not resend
-the startup prompt. Interrupted sends and handoffs are never replayed by the
-reattachment process. Enabled heartbeat schedules are paused too; resume a
-schedule separately after reviewing the conversation. Existing manual pauses,
-WAIT timers and run counters are not automatically resumed or reconstructed.
+From version 1.19.0, agents that were running resume automatically after an
+extension reload when Threadlamp can verify the same browser document, saved
+conversation and last submitted message. It monitors a response still running,
+or processes the completed Logic flag without resending the startup prompt.
+Follow-up settings, message counts and remaining WAIT deadlines are preserved.
+An agent waiting for your reply continues waiting; a sleeping agent keeps its
+heartbeat schedule. Saved queued messages stay in order.
+
+Deliberately paused or stopped agents remain paused or stopped. A draft, page
+error, changed conversation, missing checkpoint or interrupted send that cannot
+be confirmed leaves the agent paused for review. Inspect the chat, then use
+**Resume** in the popup or **Resume after reload** in the dashboard. These actions
+do not resend the startup prompt. Automatic update recovery applies to Logic
+Mode in the same loaded page, not browser restarts, page refreshes or Loop mode.
+
+**First upgrade to 1.19.0:** earlier versions did not save update checkpoints.
+Reload the extension and resume the agents once. Subsequent extension reloads
+can recover their verified runs automatically. Restart the LAN helper to retain
+the new recovery event categories in its private diagnostic reports.
 
 **First upgrade from 1.16.4 or earlier:** refresh each designated chat once when
 safe to install the new shutdown mechanism. Later extension reloads can use

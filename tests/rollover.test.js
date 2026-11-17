@@ -50,6 +50,11 @@ function exposeContentFunctions(source) {
       recoverConnectionError,
       checkpointLogicRun,
       restoreLogicReconnect,
+      saveUpdateCheckpoint,
+      restoreAfterExtensionUpdate,
+      blockUpdateCheckpoint,
+      waitForExternalOperation,
+      setUpdateRecoveryReadyForTest(value) { updateRecoveryReady = value; },
       monitorLogicReconnect,
       reconnectHash,
       reconnectUserHash,
@@ -292,6 +297,7 @@ function contentHarness(timing = {}) {
     },
     chrome: {
       runtime: {
+        id: timing.runtimeId,
         getManifest: () => ({version:"1.15.0"}),
         onMessage: { addListener() {} },
         sendMessage(request) {

@@ -68,9 +68,29 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
     // If an old startup loop survived, making the composer ready would send.
     await evaluate(page,`document.querySelector('[data-testid="stop-button"]').remove();document.querySelector("textarea").value=""`);
     await sleep(2500);assert.equal(await evaluate(page,"window.fixtureSends"),0,"retired loops cannot send when the page becomes ready");
+    // New checkpoints allow later reloads to resume an already-submitted turn.
+    await evaluate(page,`const stop=document.createElement('button');stop.dataset.testid='stop-button';stop.textContent='Stop generating';document.querySelector('main').append(stop);`);
+    await send({type:"RESUME_LOGIC",message:"Continue",limit:25,rolloverEnabled:true});
+    const checkpoint=()=>evaluate(w.sessionId,`chrome.storage.local.get('logicUpdateCheckpoints').then(v=>v.logicUpdateCheckpoints?.[${tabId}]?.settings)`);
+    for(let cycle=0;cycle<2;cycle++) {
+      await waitFor(async()=>{const c=await checkpoint();return c?.active && c.phase==='monitoring';},"verified update checkpoint");
+      const before=await send({type:"DB_SNAPSHOT"});
+      await evaluate(w.sessionId,"setTimeout(()=>chrome.runtime.reload(),50); true");await sleep(500);w=await worker();
+      const resumed=await waitFor(async()=>{const s=await send({type:"DB_SNAPSHOT"});return s.instanceId!==before.instanceId && s.running && !s.paused && s.logicPhase==='monitoring' ? s : null;},"automatic Logic resume");
+      assert.equal(resumed.count,before.count);assert.equal(resumed.limit,before.limit);
+      assert.equal(resumed.queuedPrompts.length,1);assert.equal(await evaluate(page,"window.fixtureSends"),0);
+      assert.equal(await evaluate(page,"window.fixtureDocumentToken"),"unchanged");
+      assert.equal(await evaluate(page,'document.querySelectorAll("#chatgpt-continue-loop-quick-actions").length'),1);
+    }
+    await send({type:"TOGGLE_LOGIC_PAUSE"});
+    await waitFor(async()=>{const c=await checkpoint();return c && !c.active && c.paused;},"durable manual pause");
+    const pausedBefore=await send({type:"DB_SNAPSHOT"});
+    await evaluate(w.sessionId,"setTimeout(()=>chrome.runtime.reload(),50); true");await sleep(500);w=await worker();
+    await waitFor(async()=>{const s=await send({type:"DB_SNAPSHOT"});return s.instanceId!==pausedBefore.instanceId && !s.running && s.paused;},"manual pause preserved");
+    assert.equal(await evaluate(page,"window.fixtureSends"),0);
     // A forged page event may stop automation, but cannot start it or send.
     await evaluate(page,'document.dispatchEvent(new Event("threadlamp:detach"))');
     await sleep(300);assert.equal(await evaluate(page,"window.fixtureSends"),0);
-    console.log("PASS: two real extension reloads, unchanged page and draft, durable queue, one controller, no sends.");
+    console.log("PASS: five real extension reloads; safe draft fallback, two automatic resumes, preserved manual pause, unchanged page and queue, no duplicate sends.");
   }finally{cdp?.close();browser?.kill("SIGTERM");}
 })().catch(error=>{console.error(error);process.exitCode=1;});

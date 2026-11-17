@@ -1,7 +1,7 @@
 # Threadlamp privacy notice
 
 Publisher: [Phosphoros Research](https://phosphoros-research.pages.dev/).
-Applies to Threadlamp 1.16.4 beta 1. Updated November 15, 2026.
+Applies to Threadlamp 1.19.0 beta 1. Updated November 16, 2026.
 
 ## Data handled
 
@@ -20,6 +20,7 @@ There is no extension-operated publisher telemetry, advertising or analytics ser
 | Home Assistant address, notification action and access token | Stored locally only if configured; used to contact that service. |
 | Project server bindings, credentials, setup state and event identifiers | Stored locally if configured; used for pairing and routed event delivery. |
 | Logic reconnection checkpoints | Tab/conversation identity, follow-up settings and count, and a hash of the last user message ID and text are held in extension session storage. No transcript is saved; up to 100 recent checkpoints are retained and expire for recovery after ten minutes without updates. |
+| Extension-update checkpoints | Up to 100 recent records are stored in trusted local extension storage: browser document and conversation identity, run settings/count/phase, WAIT deadline, pause/error state and hashes of the last user message and assistant response. No transcript is stored. Records older than 24 hours are ineligible and pruned on checkpoint activity; tab closure removes its record. Checkpoints are not included in settings exports. |
 | Pending phone actions and rollover records | Held in extension session storage, with some notification-routing metadata stored locally. |
 
 The dashboard does not archive complete conversation transcripts. Short excerpts

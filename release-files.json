@@ -111,7 +111,9 @@
     "tests/settings-backup.test.js",
     "tests/summary.test.js",
     "tests/thinking-discovery-diagnostic.test.js",
-    "tests/thinking.test.js"
+    "tests/thinking.test.js",
+    "tests/update-resume.test.js",
+    "update-resume-worker.js"
   ],
   "extension": [
     "BRANDING.md",
@@ -160,6 +162,7 @@
     "service-worker.js",
     "settings-backup.js",
     "summary-options.js",
-    "summary-worker.js"
+    "summary-worker.js",
+    "update-resume-worker.js"
   ]
 }

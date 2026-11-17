@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.19.0 beta 1
+
+- Automatically resume verified active Logic runs after an extension reload without refreshing the chat or resending startup instructions. Preserve counters, follow-up settings, queued messages and WAIT deadlines.
+- Keep stopped and manually paused agents inactive. Require review for drafts, existing errors, changed documents/chats and uncertain sends. Block recovery before automatic composer writes so an interrupted send cannot be replayed.
+- Restore sleeping heartbeats and ongoing cycles without overriding a deliberately paused or disabled schedule. Avoid repeating input-request alerts when restoring a verified user-input wait.
+- Store bounded private recovery checkpoints locally, using message hashes rather than transcripts. Add sanitized recovery events to diagnostics.
+- On the first upgrade from an older version, resume agents once to establish checkpoints. Automatic recovery applies on subsequent extension reloads. Restart the LAN helper for the new diagnostic event categories.
+
 ## 1.18.2 beta 1
 
 - Retry a new chat’s queue transfer up to two times when page verification explicitly rejects it before storage access. Recheck the same destination and submitted prompt before each attempt; never resend the startup prompt or retry an uncertain queue write.

@@ -192,6 +192,14 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   let reconnectCheckpointBusy = false;
   let timeoutSeenAt = null;
   let reconnectRestoring = false;
+  let updateRecoveryReady = !reattached;
+  let updateCheckpointEpoch = 0;
+  let updateCheckpointChain = Promise.resolve();
+  let updateCheckpointFingerprint = "";
+  let updateCheckpointStateKey = "";
+  let updateCheckpointAt = 0;
+  let updateSendPending = 0;
+  let updateResumeContext = null;
 
   let runOwnership = null;
   let idleLogicUrl = "";
@@ -326,6 +334,126 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   async function reconnectUserHash(snapshot) {
     const id = messageSnapshotId(snapshot);
     return id && snapshot.text ? reconnectHash(`${id}\n${snapshot.text}`) : "";
+  }
+
+  function updateRecoveryMessage(type, extra = {}) {
+    const work = () => reconnectMessage(type, extra).then(result => {
+      if (!result?.ok) throw new Error(result?.error || "Update recovery checkpoint could not be saved.");
+      return result;
+    });
+    const pending = updateCheckpointChain.then(work);
+    updateCheckpointChain = pending.catch(() => {});
+    return pending;
+  }
+
+  async function saveUpdateCheckpoint() {
+    if (!runtimeId || !controllerLive() || !updateRecoveryReady) return;
+    const epoch = ++updateCheckpointEpoch, url = window.location.href;
+    if (!/\/c\/(?!local-chatgpt)[^/]+\/?$/i.test(new URL(url).pathname)) return;
+    const stateKey=JSON.stringify([url,state.runId,state.running,state.mode,state.paused,state.error,state.logicPhase,
+      state.message,state.limit,state.count,state.rolloverEnabled,state.waitUntil,updateResumeContext?.phase,
+      updateSendPending,!!queuedPromptInFlight,quickActionPending,reconnectRestoring,reconnectPending,heartbeatSchedule?.phase]);
+    // Stable runs need only a periodic renewal, not repeated transcript reads.
+    if (stateKey === updateCheckpointStateKey && Date.now()-updateCheckpointAt < 30000) return;
+    const user = latestMessageSnapshot("user"), assistant = latestMessageSnapshot("assistant");
+    const submitted = runOwnership?.submitted;
+    const active = state.running && state.mode === "logic" && !state.paused && !state.error
+      && !updateSendPending && !queuedPromptInFlight && !quickActionPending && !reconnectRestoring && !reconnectPending
+      && ["monitoring", "resuming", "waiting_external", "waiting_user", "sleeping"].includes(state.logicPhase)
+      && (!runOwnership || runOwnership.identity === chatIdentity())
+      && (!submitted || snapshotChanged(user, submitted.before));
+    const settings = {active:!!active, mode:state.mode, paused:state.paused || state.running && !active, error:state.error,
+      phase:updateResumeContext?.phase || state.logicPhase, message:state.message, limit:state.limit, count:state.count, rolloverEnabled:state.rolloverEnabled,
+      waitUntil:updateResumeContext?.waitUntil ?? state.waitUntil, heartbeatActive:!!heartbeatSchedule?.enabled && heartbeatSchedule.phase === "active"};
+    const fingerprint = JSON.stringify([url,settings,messageSnapshotId(user),user.text,
+      active && settings.phase !== "monitoring" && settings.phase !== "resuming" ? assistant.text : ""]);
+    if (fingerprint === updateCheckpointFingerprint && Date.now()-updateCheckpointAt < 30000) return;
+    if (active) {
+      settings.userHash = await reconnectUserHash(user);
+      settings.assistantHash = await reconnectHash(assistant.text);
+      if (!settings.userHash) {settings.active = false;settings.paused = true;}
+    }
+    if (!controllerLive() || epoch !== updateCheckpointEpoch || window.location.href !== url) return;
+    updateCheckpointStateKey=stateKey;updateCheckpointFingerprint=fingerprint;updateCheckpointAt=Date.now();
+    try {await updateRecoveryMessage("UR_SAVE", {settings});}
+    catch (error) {if (updateCheckpointStateKey === stateKey) {updateCheckpointStateKey="";updateCheckpointFingerprint="";}throw error;}
+  }
+
+  async function blockUpdateCheckpoint() {
+    if (!runtimeId) return;
+    ++updateCheckpointEpoch;updateCheckpointFingerprint="";updateCheckpointStateKey="";
+    if (/\/c\/(?!local-chatgpt)[^/]+\/?$/i.test(new URL(window.location.href).pathname)) {
+      await updateRecoveryMessage("UR_BLOCK");
+    }
+  }
+
+  async function restoreAfterExtensionUpdate() {
+    const url = window.location.href, runId = state.runId;
+    let restoringRunId = runId;
+    try {
+      const result = await updateRecoveryMessage("UR_CLAIM");
+      if (!controllerLive() || state.runId !== runId || window.location.href !== url) return;
+      const saved = result.record;
+      if (!saved) {
+        state.detail="No verified update checkpoint is available. Inspect this chat, then use Resume in the popup or Resume after reload in the dashboard. No prompt was resent; saved queues are preserved.";
+        updateOverlay();return;
+      }
+      if (!saved.active) {
+        state.mode=saved.mode;state.paused=saved.paused;state.error=saved.error;
+        state.logicPhase=saved.paused || saved.error ? "update_paused" : "idle";
+        state.detail=saved.error ? "Threadlamp reattached. The previous error still needs review."
+          : saved.paused ? "Threadlamp reattached. This agent remains paused; review its last response before resuming." : "Threadlamp reattached. This agent remains stopped.";
+        terminalNotice=saved.paused || saved.error;updateOverlay();return;
+      }
+      const started=Date.now();let readySince=null;
+      while (controllerLive() && state.runId === runId && Date.now()-started < 15000) {
+        if (window.location.href !== url) throw new Error("The chat changed during update recovery.");
+        if (composerText(findComposer())) throw new Error("A draft is present and was preserved.");
+        if (findConnectionErrorNotice() || reconnectPageError() || hasMaximumLengthNotice()) throw new Error("The chat has an error that needs review.");
+        const user=latestMessageSnapshot("user"), assistant=latestMessageSnapshot("assistant");
+        const matches = findComposer() && user.element && await reconnectUserHash(user) === saved.userHash
+          && (["monitoring","resuming"].includes(saved.phase) || await reconnectHash(assistant.text) === saved.assistantHash);
+        if (!controllerLive() || state.runId !== runId) return;
+        if (window.location.href !== url || composerText(findComposer())) throw new Error("The chat or draft changed during update recovery.");
+        if (matches && !snapshotChanged(latestMessageSnapshot("user"),user)
+          && (["monitoring","resuming"].includes(saved.phase) || !snapshotChanged(latestMessageSnapshot("assistant"),assistant))) {
+          readySince ??= Date.now();
+          if (Date.now()-readySince >= READY_STABLE_MS) {
+            await updateRecoveryMessage("UR_CONFIRM");
+            if (!controllerLive() || state.runId !== runId) return;
+            if (window.location.href !== url || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"),user)
+              || findConnectionErrorNotice() || reconnectPageError()) throw new Error("The chat changed before automatic resume.");
+            Object.assign(state,{running:true,paused:false,error:false,mode:"logic",logicPhase:saved.phase,
+              message:saved.message,limit:saved.limit,count:saved.count,rolloverEnabled:saved.rolloverEnabled,
+              waitUntil:saved.waitUntil,waitMinutes:null});
+            state.runId++;restoringRunId=state.runId;bindRunOwnership(state.runId);
+            await attachHeartbeat();
+            if (!controllerLive() || state.runId !== runId+1 || window.location.href !== url) return;
+            recordDiagnostic("update_restored");
+            updateRecoveryReady=true;
+            if (saved.phase === "sleeping") {
+              if (!heartbeatSchedule?.enabled || !["armed","sleeping"].includes(heartbeatSchedule.phase)) {
+                throw new Error("The previous heartbeat is no longer available or needs review.");
+              }
+              heartbeatBaselineUser=latestMessageSnapshot("user");
+              setDetail("Threadlamp resumed automatically. Sleeping until the next heartbeat.");
+            } else {
+              setDetail("Threadlamp resumed automatically without resending the startup prompt.");
+              void runLogicMode(state.runId,true,LOGIC_START_PROMPT,undefined,null,false,saved);
+            }
+            return;
+          }
+        } else readySince=null;
+        await sleep(POLL_MS);
+      }
+      if (state.runId === runId) throw new Error("The saved run could not be verified. Resume after reviewing this chat.");
+    } catch (error) {
+      if (controllerLive() && state.runId === restoringRunId && window.location.href === url) {
+        state.running=false;state.paused=true;state.logicPhase="update_paused";
+        state.detail=`Automatic resume paused: ${error.message} No prompt was resent.`;
+        terminalNotice=true;updateOverlay();recordDiagnostic("update_resume_blocked");
+      }
+    } finally {updateRecoveryReady=true;}
   }
 
   function reconnectPageError() {
@@ -1138,6 +1266,8 @@ ${LOGIC_START_PROMPT}
     quickActionPending = true;
     let attempted = false;
     try {
+      await blockUpdateCheckpoint();
+      guard("");
       if (!writeToComposer(composer, text)) throw new Error("ChatGPT did not accept text in the composer.");
       if (!await waitForCondition(() => buttonIsEnabled(findSendButton()), SEND_ENABLE_TIMEOUT_MS)) throw new Error("Send did not become available. The draft was preserved.");
       guard(text);
@@ -1379,6 +1509,7 @@ ${LOGIC_START_PROMPT}
   }
 
   function acceptHeartbeat(request) {
+    if (controllerLive() && !updateRecoveryReady) return {accepted:false,busy:true};
     if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
     if (serverSetup) return { accepted: false, busy: true };
     const schedule = request.schedule;
@@ -2423,6 +2554,8 @@ ${LOGIC_START_PROMPT}
 
   function setDetail(detail, error = false, retainNotice = false) {
     if (!controllerLive()) return;
+    state.error = error;
+    void saveUpdateCheckpoint().catch(() => {});
     const diagnosticKey = [state.mode, state.logicPhase, state.running, state.paused, error].join(":");
     if (error || diagnosticKey !== diagnosticState) {
       diagnosticState = diagnosticKey;
@@ -2939,6 +3072,7 @@ ${LOGIC_START_PROMPT}
     const userBefore = latestMessageSnapshot("user");
 
     try {
+      await blockUpdateCheckpoint();
       if (!writeToComposer(composer, prompt)) {
         throw new Error("ChatGPT did not accept the quick prompt.");
       }
@@ -3240,7 +3374,19 @@ ${LOGIC_START_PROMPT}
     return composerText(composer) === "";
   }
 
-  async function submitMessage(
+  async function submitMessage(...args) {
+    updateSendPending++;
+    try {
+      // Fence recovery before any composer write or Send, including queued text.
+      await blockUpdateCheckpoint();
+      return await submitMessageInternal(...args);
+    } finally {
+      updateSendPending--;
+      void saveUpdateCheckpoint().catch(() => {});
+    }
+  }
+
+  async function submitMessageInternal(
     runId,
     text,
     typingDetail,
@@ -3708,8 +3854,8 @@ ${LOGIC_START_PROMPT}
     }).format(timestamp);
   }
 
-  async function waitForExternalOperation(runId, previousUser, waitMinutes) {
-    const deadline = Date.now() + waitMinutes * MINUTE_MS;
+  async function waitForExternalOperation(runId, previousUser, waitMinutes, restoredDeadline = null) {
+    const deadline = restoredDeadline ?? Date.now() + waitMinutes * MINUTE_MS;
     let displayedSeconds = null;
     state.waitUntil = deadline;
     state.waitMinutes = waitMinutes;
@@ -3829,9 +3975,11 @@ ${LOGIC_START_PROMPT}
     startPrompt = LOGIC_START_PROMPT,
     startDetail = "Sending the Logic Mode instructions…",
     startupFailureContext = null,
-    requireServerEvent = false
+    requireServerEvent = false,
+    updateResume = null
   ) {
     bindRunOwnership(runId);
+    updateResumeContext = updateResume;
     let startupComplete = resume;
 
     const chatTitle = currentConversationTitle() || startupFailureContext?.previousTitle || "";
@@ -3929,6 +4077,10 @@ ${LOGIC_START_PROMPT}
         } = classifyLogicResponse(response);
 
         publishOutputSummary(response, directive.flag);
+        const restoredPhase = updateResume?.phase;
+        const restoredWaitUntil = updateResume?.waitUntil;
+        updateResume = null;
+        updateResumeContext = null;
 
         state.userInputBrief = flag === "user_input"
           ? parseLogicBrief(response.text)
@@ -3953,7 +4105,8 @@ ${LOGIC_START_PROMPT}
           const waitResult = await waitForExternalOperation(
             runId,
             previousUser,
-            directive.waitMinutes
+            directive.waitMinutes,
+            restoredPhase === "waiting_external" ? restoredWaitUntil : null
           );
           if (waitResult.reason === "stopped" || state.runId !== runId) return;
 
@@ -3996,7 +4149,9 @@ ${LOGIC_START_PROMPT}
           state.logicPhase = "waiting_user";
           let pausedDetail;
 
-          if (flag === "user_input") {
+          if (flag === "user_input" && restoredPhase === "waiting_user") {
+            pausedDetail = "Logic Mode resumed. Still waiting for your reply.";
+          } else if (flag === "user_input") {
             pausedDetail = state.userInputBrief
               ? `Logic Mode paused. ${state.userInputBrief}`
               : "Logic Mode paused. Waiting for your message…";
@@ -4385,6 +4540,7 @@ ${LOGIC_START_PROMPT}
     state.error = false;
     updateOverlay();
     updateQuickActions();
+    void saveUpdateCheckpoint().catch(() => {});
     if (heartbeatSchedule?.enabled && !state.paused && state.logicPhase !== "waiting_user") {
       void heartbeatMessage("HB_RESUME", { active: state.logicPhase !== "sleeping" }).then(result => {
         if (result?.ok === false) throw new Error(result.error);
@@ -4554,15 +4710,15 @@ ${LOGIC_START_PROMPT}
   window.__threadlampController = {dispose:disposeController};
   if (reattached) {
     state.mode = "logic"; state.logicPhase = "update_paused"; state.paused = true;
-    state.detail = "Threadlamp reattached after an update. Inspect the last response and any draft, then use Resume in the popup or Resume after reload in the dashboard. No prompt was resent; saved queues are preserved.";
+    state.detail = "Threadlamp reattached. Checking the saved run before automatic resume. No prompt was resent; saved queues are preserved.";
     terminalNotice = true;
   }
 
   createQuickActions();
   updateQuickActions();
-  void queueStore.ready.then(() => reattached || !controllerLive() ? null : restoreLogicReconnect()).then(() => {
+  void queueStore.ready.then(() => !controllerLive() ? null : reattached ? restoreAfterExtensionUpdate() : restoreLogicReconnect()).then(() => {
     if (!controllerLive()) return;
-    if (reattached) { void attachHeartbeat(); return; }
+    if (reattached) { if (!state.running) void attachHeartbeat(); return; }
     void claimPendingLogicRollover();
     void attachHeartbeat();
   }).catch(() => {});
@@ -4573,7 +4729,7 @@ ${LOGIC_START_PROMPT}
   }
   lifecycleTimers.push(window.setInterval(checkSleepingActivity, QUICK_ACTION_REFRESH_MS));
   lifecycleTimers.push(window.setInterval(updateQuickActions, QUICK_ACTION_REFRESH_MS));
-  lifecycleTimers.push(window.setInterval(publishDashboardStatus, 1000));
+  lifecycleTimers.push(window.setInterval(() => {publishDashboardStatus();void saveUpdateCheckpoint().catch(() => {});}, 1000));
   window.addEventListener("resize", updateQuickActions, { passive: true });
   window.addEventListener("pagehide", onPageHide);
   updateOverlay();

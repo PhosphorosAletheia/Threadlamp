@@ -90,9 +90,13 @@
     if (await ownedElsewhere()) return false;
     const interrupted = record.enabled && ["active", "dispatching"].includes(record.phase)
       && record.instanceId && record.instanceId !== request.instanceId;
+    const update = interrupted ? (await chrome.storage.local.get("logicUpdateCheckpoints")).logicUpdateCheckpoints?.[sender.tab.id] : null;
+    const verifiedUpdate = update?.confirmed && update.claimed && update.instanceId === request.instanceId
+      && update.documentId === sender.documentId && update.url === Heartbeat.canonicalUrl(currentTab.url)
+      && update.settings?.active && update.settings.heartbeatActive && Date.now()-update.at < 24*60*60*1000;
     record.tabId = sender.tab.id;
     record.instanceId = request.instanceId;
-    if (interrupted) {
+    if (interrupted && !verifiedUpdate) {
       await block(records, record, "This chat reloaded during an active cycle. Inspect its last response, then Resume Logic Mode or the schedule.");
     } else {
       if (confirmIdle && record.enabled && !["paused", "blocked", "disabled"].includes(record.phase)) {
