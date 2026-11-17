@@ -28,7 +28,9 @@ It allows up to five follow-ups. The 15-minute setup lease renews while
 the same chat page and attempt remain active. Abandoned attempts expire.
 
 A draft, manual pause, active task, or request for human input can prevent setup.
-Resolve the condition before retrying. **Stop** or **Disable** cancels setup
+The popup reports the specific blocking condition. Resolve it before retrying.
+An older USER_INPUT marker does not block an explicit setup in an inactive chat;
+a current Logic Mode input wait still does. **Stop** or **Disable** cancels setup
 without clearing manual text. The popup displays setup errors.
 
 ## LAN servers

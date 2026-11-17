@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.20.1 beta 1
+
+- Allow an explicit server setup in an inactive chat when an older response ended with USER_INPUT. Keep active input waits, drafts, pauses, errors and running responses protected.
+- Explain the specific condition blocking setup instead of displaying a combined pause/error/draft warning.
+
 ## 1.20.0 beta 1
 
 - Set up project servers on a private LAN IPv4 address, with encrypted WebSockets and a certificate trusted by Chrome. Bind setup replies to the selected host and request permission only for that host; existing localhost connections continue to work.

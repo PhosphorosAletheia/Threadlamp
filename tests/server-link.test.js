@@ -604,6 +604,7 @@ async function contentTests() {
   let f = fixture();
   f.hide(); f.window.location = new URL(sourceUrl);
   Object.assign(f.api.state, { running: false, mode: "idle", logicPhase: "idle" });
+  f.assistant().textContent = "Earlier request for setup information.\n[[LOGIC:USER_INPUT]]";
   const setup = { url: sourceUrl, projectId: project, setupId: "setup-one", prompt: "Set up server", expiresAt: 900000 };
   const requests = [];
   f.setRequestHandler(async request => {
@@ -643,7 +644,7 @@ async function contentTests() {
   assert.equal(f.api.state.error, false, "the final permitted setup follow-up can finish pairing");
   assert.equal(f.sends.length, 7, "initial setup, five follow-ups, and confirmation");
 
-  for (const kind of ["draft", "busy", "paused", "waiting_user", "wrong_chat"]) {
+  for (const kind of ["draft", "busy", "paused", "waiting_user", "wrong_chat", "generating", "error", "composer_missing"]) {
     f = fixture(); f.hide(); f.window.location = new URL(sourceUrl);
     Object.assign(f.api.state, { running: false, mode: "idle", logicPhase: "idle" });
     if (kind === "draft") f.composer.innerText = "Manual draft";
@@ -651,7 +652,13 @@ async function contentTests() {
     if (kind === "paused") f.api.state.paused = true;
     if (kind === "waiting_user") f.api.state.logicPhase = "waiting_user";
     if (kind === "wrong_chat") f.window.location = new URL(sourceUrl.replace("/source", "/another"));
-    assert.equal(f.api.startServerSetup(setup).accepted, false, kind);
+    if (kind === "generating") f.setSelector("button[data-testid='stop-button']", [f.send]);
+    if (kind === "error") f.api.state.error = true;
+    if (kind === "composer_missing") f.setSelector("#prompt-textarea", []);
+    const rejected = f.api.startServerSetup(setup);
+    assert.equal(rejected.accepted, false, kind);
+    assert.equal(rejected.reason, ({busy:"running",wrong_chat:"chat_changed"})[kind] || kind);
+    assert.ok(!rejected.detail.includes("resolve any pause or error"), "show the actual blocker");
     assert.equal(f.sends.length, 0);
   }
 

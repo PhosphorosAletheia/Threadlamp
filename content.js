@@ -1626,15 +1626,26 @@ ${LOGIC_START_PROMPT}
   function startServerSetup(request) {
     const recoverUpdatePause = request.recovering === true && updateRecoveryReady && !state.running
       && state.mode === "setup" && state.logicPhase === "update_paused" && !state.error;
-    if (!controllerLive() || state.logicPhase === "update_paused" && !recoverUpdatePause) return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat before resuming; use Recover connection to restart interrupted server setup."};
-    if (serverSetup || state.paused && !recoverUpdatePause || (state.error && state.logicPhase !== "server_setup_failed") || isGenerating() || composerText(findComposer())
-      || hasMaximumLengthNotice() || !findComposer() || state.logicPhase === "waiting_user"
-      || (!request.recovering && parseLogicDirective(latestMessageSnapshot("assistant").text).flag === "user_input")
-      || (state.running && state.logicPhase !== "sleeping")
-      || request.url !== window.location.href.split(/[?#]/)[0]
-      || ServerLink.projectId(request.url) !== request.projectId) {
-      return { accepted: false, detail: "Finish the current response, resolve any pause or error, and clear the draft before starting server setup." };
+    const refuse = (reason, detail) => ({accepted: false, blocked: true, reason, detail});
+    if (!controllerLive()) return refuse("controller", "Threadlamp is updating. Wait for it to reattach before starting server setup.");
+    if (request.url !== window.location.href.split(/[?#]/)[0]
+      || ServerLink.projectId(request.url) !== request.projectId) return refuse("chat_changed", "The selected project chat changed. Reopen setup in the intended conversation.");
+    if (state.logicPhase === "update_paused" && !recoverUpdatePause) return refuse("update_paused", "Threadlamp reattached. Inspect the chat before resuming; use Recover connection to restart interrupted server setup.");
+    if (serverSetup) return refuse("setup_active", "Server setup is already running. Wait for it to finish or disable the connection first.");
+    if (state.paused && !recoverUpdatePause) return refuse("paused", "This agent is paused. Resolve the pause before starting server setup.");
+    if (state.error && state.logicPhase !== "server_setup_failed") return refuse("error", "This agent has an unresolved error. Inspect and resolve it before starting server setup.");
+    if (isGenerating()) return refuse("generating", "The chat is still responding. Wait for the response to finish before starting server setup.");
+    const composer = findComposer();
+    if (!composer) return refuse("composer_missing", "The chat message box is unavailable. Wait for the conversation to finish loading.");
+    if (composerText(composer)) return refuse("draft", "The chat message box contains an unsent draft. Send, save or clear it before starting server setup.");
+    if (hasMaximumLengthNotice()) return refuse("chat_full", "This conversation reached its length limit. Open its continuation chat before starting server setup.");
+    // An explicit setup click starts a new task in an inactive chat. A marker
+    // from an older response must not masquerade as a current Logic input wait.
+    if (state.logicPhase === "waiting_user"
+      || (state.running && !request.recovering && parseLogicDirective(latestMessageSnapshot("assistant").text).flag === "user_input")) {
+      return refuse("waiting_user", "Logic Mode is waiting for your input. Resolve that request or stop Logic Mode before starting server setup.");
     }
+    if (state.running && state.logicPhase !== "sleeping") return refuse("running", "Logic Mode is still active. Wait until it sleeps or stop it before starting server setup.");
     const resumeSleeping = state.running && state.logicPhase === "sleeping";
     state.runId += 1; state.running = true; state.paused = false; state.mode = "setup"; state.logicPhase = "server_setup"; state.error = false;
     serverSetup = { ...request, resumeSleeping, runId: state.runId };
