@@ -537,11 +537,12 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       if (!settings || settings.count !== state.count || settings.limit !== state.limit || settings.message !== state.message) throw new Error("No verified run checkpoint is available. Inspect the chat before resuming.");
       if (!state.running || state.runId !== runId || window.location.href !== url) return null;
       state.paused = false;
-      setDetail("Connection lost. Waiting 30 seconds before one reload; no prompt will be resent…");
+      const reloadDelay = response.reason === "conversation_load_failed" ? 20000 : 30000;
+      setDetail(`Connection lost. Waiting ${reloadDelay / 1000} seconds before reload; no prompt will be resent. Stop cancels recovery.`);
       state.paused = true; state.pausedDetail = state.detail;
       state.logicPhase = "reconnecting"; recordDiagnostic("reconnect_start", {reason:response.reason}); updateOverlay();
       const started = Date.now();
-      while (Date.now() - started < 30000) {
+      while (Date.now() - started < reloadDelay) {
         if (!state.running || state.runId !== runId) return null;
         if (window.location.href !== url || !state.paused || isGenerating()
           || queuedPrompts[0] || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
@@ -570,20 +571,16 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   }
 
   async function retryConversationLoad(runId, record, url) {
-    const delays = [30000, 60000, 120000, 120000];
+    const delay = 20000;
     const attempt = record.loadRetries || 0;
-    const recoveryStartedAt = record.recoveryStartedAt ?? Date.now();
-    if (attempt >= delays.length || Date.now() - recoveryStartedAt >= 600000) {
-      throw new Error("Conversation-load recovery reached its retry or ten-minute limit. Inspect the page before resuming.");
-    }
     const current = () => controllerLive() && state.running && state.runId === runId && window.location.href === url;
     const safe = () => !isGenerating() && !composerText(findComposer()) && !queuedPrompts[0] && !queuedPromptInFlight;
     if (!safe()) throw new Error("A draft, queued message or active response needs review before another reload.");
     state.paused = true;
-    setDetail(`Conversation could not load. Reload attempt ${attempt + 1} of ${delays.length} in ${delays[attempt] / 1000} seconds; no prompt will be resent…`);
+    setDetail(`Conversation could not load. Reload attempt ${attempt + 1} in 20 seconds; retrying until it loads. Stop cancels recovery. No prompt will be resent.`);
     recordDiagnostic("reconnect_start", {reason: "conversation_load_failed", retryAttempt: attempt + 1});
     const started = Date.now();
-    while (Date.now() - started < delays[attempt]) {
+    while (Date.now() - started < delay) {
       if (!current()) return true;
       if (!state.paused || !safe()) throw new Error("The chat or queue changed while waiting to reload; its draft and messages were preserved.");
       if (!findConversationLoadError()) { state.paused = false; return false; }
@@ -2960,7 +2957,9 @@ ${LOGIC_START_PROMPT}
     );
     pauseButton.textContent = idleCycle ? "Start next cycle" : state.paused ? "Resume" : "Pause";
     pauseButton.setAttribute("aria-pressed", String(state.paused));
-    overlayHost.shadowRoot.querySelector(".stop").hidden = !state.running && !idleCycle;
+    const stopButton = overlayHost.shadowRoot.querySelector(".stop");
+    stopButton.hidden = !state.running && !idleCycle;
+    stopButton.textContent = state.logicPhase === "reconnecting" ? "Stop recovery" : "Stop";
     updatePromptControls();
 
     if (!state.paused && state.logicPhase === "waiting_external" && state.waitUntil) {

@@ -53,12 +53,13 @@ const { contentHarness } = require("./rollover.test.js");
   await h.dispatch(req("SAVE"), sender);
   h.setNow(Date.parse("2026-10-16T14:11:00Z"));
   assert.equal((await h.dispatch(req("CLAIM", { instanceId: "late-page" }), sender)).record, null, "expired runs are not restored");
-  // Failed conversation loads have their own bounded retry budget. The
+  // Failed conversation loads retry without a count or elapsed-time limit. The
   // checkpoint is carried across reloads without trusting replacement settings.
   h.setNow(Date.parse("2026-10-16T14:20:00Z"));
   await h.dispatch(req("SAVE"), sender); await h.dispatch(req("PREPARE"), sender);
   assert.equal((await h.dispatch(req("RETRY_LOAD"), sender)).ok, false, "the old page cannot retry before a claim");
-  for (let n = 1; n <= 4; n++) {
+  for (let n = 1; n <= 64; n++) {
+    h.setNow(Date.parse("2026-10-16T14:20:00Z") + n * 20000);
     const instanceId = `load-page-${n}`;
     const claimed = await h.dispatch(req("CLAIM", {instanceId}), sender);
     assert.equal(claimed.record.requested, true);
@@ -69,17 +70,13 @@ const { contentHarness } = require("./rollover.test.js");
     assert.equal(h.session.values.logicReconnectCheckpoints[17].settings.userHash,settings.userHash);
     assert.equal((await h.dispatch(req("RETRY_LOAD", {instanceId}),sender)).ok,false,"cannot schedule duplicate reloads");
   }
-  await h.dispatch(req("CLAIM",{instanceId:"load-page-5"}),sender);
-  const exhausted=await h.dispatch(req("RETRY_LOAD",{instanceId:"load-page-5"}),sender);
-  assert.equal(exhausted.ok,false);assert.match(exhausted.error,/retry or ten-minute limit/);
-  await h.dispatch(req("SAVE",{instanceId:"load-page-5"}),sender);
-  assert.equal(h.session.values.logicReconnectCheckpoints[17].loadRetries,4,"checkpoint refresh preserves retry budget");
-  await h.dispatch(req("CLEAR",{instanceId:"load-page-5"}),sender);
-  await h.dispatch(req("SAVE"),sender); await h.dispatch(req("PREPARE"),sender);
-  h.setNow(Date.parse("2026-10-16T14:29:00Z"));
-  await h.dispatch(req("CLAIM",{instanceId:"slow-load"}),sender);
-  h.setNow(Date.parse("2026-10-16T14:30:01Z"));
-  const expired=await h.dispatch(req("RETRY_LOAD",{instanceId:"slow-load"}),sender);
-  assert.equal(expired.ok,false);assert.match(expired.error,/ten-minute limit/,"claiming a page must not extend the total deadline");
-  console.log("reconnection worker: sender, tab and chat binding, durable single claim, reload budget, cancellation and expiry passed");
+  h.setNow(Date.parse("2026-10-17T14:20:00Z"));
+  const delayedClaim = await h.dispatch(req("CLAIM",{instanceId:"slow-load"}),sender);
+  assert.equal(delayedClaim.record.loadRetries,64,"a planned reload survives suspension beyond ten minutes");
+  h.setNow(Date.parse("2026-10-18T14:20:00Z"));
+  const continued = await h.dispatch(req("RETRY_LOAD",{instanceId:"slow-load"}),sender);
+  assert.equal(continued.ok,true,continued.error);assert.equal(continued.loadRetries,65);
+  await h.dispatch(req("CLEAR",{instanceId:"slow-load"}),sender);
+  assert.equal((await h.dispatch(req("CLAIM",{instanceId:"after-stop"}),sender)).record,null,"Stop revokes even an already prepared next reload");
+  console.log("reconnection worker: sender, tab and chat binding, durable single claim, unlimited load retries, cancellation and inactive expiry passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });

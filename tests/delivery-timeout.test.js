@@ -95,9 +95,9 @@ async function conversationLoadTests() {
   await f.api.checkpointLogicRun();
   const notice=failPage(f);
   assert.equal(f.api.connectionErrorResponse().reason,"conversation_load_failed");
-  let reloads=0;f.window.location.reload=()=>{reloads++;};
+  let reloads=0,initialReloadAt=0;f.onTick(now=>{initialReloadAt=now;});f.window.location.reload=()=>{reloads++;};
   await f.api.recoverConnectionError(1,f.api.connectionErrorResponse());
-  assert.equal(reloads,1);assert.equal(f.sends.length,0);
+  assert.equal(reloads,1);assert.equal(f.sends.length,0);assert.equal(initialReloadAt,20000,"initial load-error recovery also waits twenty seconds");
   // Text in a loaded conversation, prose, or a hidden notice cannot trigger it.
   for(const kind of ["composer","message","prose","hidden","different-text"]) {
     f=fixture();f.hide();const n=failPage(f);
@@ -108,13 +108,13 @@ async function conversationLoadTests() {
     if(kind==="different-text")n.textContent="A discussion of: "+message;
     assert.equal(f.api.findConversationLoadError(),null,kind);
   }
-  for(const kind of ["retry-0","retry-1","retry-2","retry-3","exhausted","deadline","loaded","stop","navigate","draft","queued","resume","storage-failure","late-draft"]) {
+  for(const kind of ["retry-0","retry-1","retry-2","retry-3","retry-64","retry-1000","loaded","stop","navigate","draft","queued","resume","storage-failure","late-draft"]) {
     f=fixture();f.hide();
     const settings={message:"Configured followup",limit:5,count:3,rolloverEnabled:true,verifiedUser:true,
       userHash:await f.api.reconnectUserHash({element:f.user(),text:f.user().textContent})};
-    const record={token:"load-run",attempted:true,requested:true,settings,loadRetries:kind==="exhausted"?4:Number(kind.split("-")[1])||0,recoveryStartedAt:0};
+    const record={token:"load-run",attempted:true,requested:true,settings,loadRetries:Number(kind.split("-")[1])||0,recoveryStartedAt:0};
     const pageError=failPage(f);
-    if(kind==="deadline")f.advanceClock(600001);
+    const clockOffset=kind==="retry-1000"?86400000:0;f.advanceClock(clockOffset);
     f.api.state.running=false;f.api.state.mode="idle";
     const runs=f.api.captureHeartbeatRunsForTest();let reloadCount=0,reloadAt=0;
     f.window.location.reload=()=>{reloadCount++;};
@@ -130,7 +130,7 @@ async function conversationLoadTests() {
     f.onTick(now=>{
       reloadAt=now;
       if(changed)return;changed=true;
-      if(kind==="stop"){f.api.state.running=false;f.api.state.runId++;}
+      if(kind==="stop")f.api.stopLogicMode();
       if(kind==="resume")f.api.state.paused=false;
       if(kind==="navigate")f.window.location=new URL("https://chatgpt.com/c/elsewhere");
       if(kind==="draft")f.setSelector("#prompt-textarea",[Object.assign(f.composer,{innerText:"Keep draft"})]);
@@ -143,7 +143,9 @@ async function conversationLoadTests() {
     await f.api.restoreLogicReconnect();
     if(kind.startsWith("retry-")) {
       assert.equal(reloadCount,1,kind);assert.equal(runs.length,0);
-      assert.ok(reloadAt >= [30000,60000,120000,120000][record.loadRetries],kind);
+      assert.equal(reloadAt-clockOffset,20000,kind);
+      const stop=f.api.getOverlayForTest().shadowRoot.querySelector(".stop");
+      assert.equal(stop.hidden,false);assert.equal(stop.textContent,"Stop recovery");
       assert.equal(f.api.state.count,3);assert.equal(f.api.state.paused,true);
     } else {
       assert.equal(reloadCount,0,kind);

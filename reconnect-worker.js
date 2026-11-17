@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: MPL-2.0 */
 (() => {
   "use strict";
-  const KEY = "logicReconnectCheckpoints", TTL = 10 * 60 * 1000, MAX_LOAD_RETRIES = 4;
+  const KEY = "logicReconnectCheckpoints", TTL = 10 * 60 * 1000;
   let queue = Promise.resolve();
   // Older controllers use timestamp-Math.random() IDs and derived run tokens
   // containing a decimal point. Both are bounded opaque ownership values.
@@ -26,7 +26,12 @@
     if (!url || url !== Heartbeat.canonicalUrl(sender.tab.url)
       || url !== Heartbeat.canonicalUrl(request.url)) throw new Error("The reconnection target changed.");
     const records = (await chrome.storage.session.get(KEY))[KEY] || {};
-    for (const [key, record] of Object.entries(records)) if (Date.now() - record.at > TTL) delete records[key];
+    for (const [key, record] of Object.entries(records)) {
+      // Planned recovery retains its verified checkpoint until success or Stop,
+      // including browser suspension. Ordinary inactive checkpoints still expire.
+      const recovering = record.attempted && record.settings?.verifiedUser && (record.requested || record.claimed);
+      if (!recovering && Date.now() - record.at > TTL) delete records[key];
+    }
     let record = records[tab.id];
     const matches = record && record.url === url;
     let result = { ok: true };
@@ -44,19 +49,17 @@
       if (sameRun && record.requested) return { ok: true };
       records[tab.id] = { url, instanceId: request.instanceId, token: request.token, at: Date.now(),
         attempted: Boolean(sameRun && record.attempted),
-        loadRetries: sameRun ? record.loadRetries || 0 : 0, recoveryStartedAt: sameRun ? record.recoveryStartedAt : undefined, requested: false, claimed: false, settings: settings(request.settings) };
+        loadRetries: sameRun ? record.loadRetries || 0 : 0, requested: false, claimed: false, settings: settings(request.settings) };
     } else if (request.type === "LR_PREPARE") {
       if (!matches || record.instanceId !== request.instanceId || record.token !== request.token || record.attempted) throw new Error("Automatic reconnection is unavailable or was already attempted. Inspect the chat before resuming.");
       record.settings = settings(request.settings);
       record.attempted = true; record.requested = true; record.claimed = false; record.at = Date.now();
-      record.recoveryStartedAt = Date.now(); record.loadRetries = 0;
+      record.loadRetries = 0;
     } else if (request.type === "LR_RETRY_LOAD") {
       if (!matches || record.instanceId !== request.instanceId || record.token !== request.token
         || !record.claimed || record.requested || !record.attempted || !record.settings.verifiedUser) throw new Error("The conversation-load recovery no longer owns this page.");
-      const started = record.recoveryStartedAt ?? record.at;
       const count = record.loadRetries || 0;
-      if (count >= MAX_LOAD_RETRIES || Date.now() - started >= TTL) throw new Error("Conversation-load recovery reached its retry or ten-minute limit. Inspect the page before resuming.");
-      record.loadRetries = count + 1; record.recoveryStartedAt = started;
+      record.loadRetries = Math.min(Number.MAX_SAFE_INTEGER, count + 1);
       record.requested = true; record.claimed = false; record.at = Date.now();
       result.loadRetries = record.loadRetries;
     } else throw new Error("Unknown reconnection request.");

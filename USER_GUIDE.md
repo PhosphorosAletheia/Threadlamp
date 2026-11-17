@@ -42,15 +42,15 @@ During an active Logic run, Threadlamp saves a temporary checkpoint for that tab
 and conversation. A **Message delivery timed out. Please try again.** or
 **Error in message stream** alert with a Retry button triggers a 30-second wait
 and one initial reload. The empty-page error **Could not load this ChatGPT
-conversation** can also trigger this recovery. Threadlamp never clicks Retry or
+conversation** starts recovery after 20 seconds. Threadlamp never clicks Retry or
 resends the interrupted prompt. Text quoted inside a chat response does not
 trigger recovery.
 
-If that conversation-loading error persists after reload, Threadlamp makes up to
-four additional attempts, waiting 30, 60, 120 and 120 seconds between them. The
-whole retry sequence is limited to ten minutes from the initial recovery reload.
-The status shows the attempt number and delay. If the page loads during a wait,
-Threadlamp verifies it without doing the next reload.
+While that conversation-loading error persists, Threadlamp waits 20 seconds and
+reloads again until the conversation loads. There is no attempt cap or total
+time limit. The status shows the attempt number; **Stop recovery** on the page
+(or **Stop** in the dashboard or popup) cancels recovery. If the page loads during
+a wait, Threadlamp verifies it without doing the next reload.
 
 After loading, Threadlamp verifies the conversation URL and last submitted message
 by its message ID and a hash. It restores the message count and settings, monitors
@@ -58,11 +58,12 @@ an ongoing response, or processes a completed response's Logic flag. Reloading
 does not consume a follow-up. A page without a recognized loading error has up to
 60 seconds to provide the matching conversation before recovery pauses.
 
-Other errors, a changed message, or exhausted retries leave Logic Mode visibly
-paused. Drafts and queued instructions also pause recovery so they are not lost.
+Other errors or a changed message leave Logic Mode visibly paused. Drafts and queued instructions also pause recovery so they are not lost.
 **Stop** cancels recovery without sending a shutdown prompt. An unrelated manual
 reload restores a recent checkpoint in a paused state for review. Checkpoints
-expire after ten minutes without updates and are not a permanent backup.
+for an active, planned recovery remain available until recovery finishes or is
+cancelled. Ordinary inactive checkpoints expire after ten minutes. Checkpoints
+are stored for the browser session and are not a permanent backup.
 
 This requires a checkpoint from a running Logic cycle. A chat already stopped by
 an older version's recovery error cannot recover its discarded checkpoint: once

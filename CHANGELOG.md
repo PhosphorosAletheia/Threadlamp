@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.21.1 beta 1
+
+- Retry “Could not load this ChatGPT conversation” every 20 seconds until it loads, without an attempt cap or total recovery timeout. Preserve the verified recovery checkpoint during extended outages or browser suspension.
+- Show Stop recovery on the page during reconnection. Stop cancels the next reload without sending a prompt. Continue to halt for changed chats, drafts, queued messages or other errors, and verify the recovered conversation before resuming Logic Mode.
+
 ## 1.21.0 beta 1
 
 - Recognize ChatGPT's “Could not load this ChatGPT conversation” page during an active Logic run or its recovery. Retry failed loads with up to four additional reloads, spaced 30, 60, 120 and 120 seconds apart, within a ten-minute recovery window.
