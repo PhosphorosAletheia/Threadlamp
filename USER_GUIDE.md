@@ -41,21 +41,34 @@ Stopping a sleeping chat does not send that shutdown message.
 During an active Logic run, Threadlamp saves a temporary checkpoint for that tab
 and conversation. A **Message delivery timed out. Please try again.** or
 **Error in message stream** alert with a Retry button triggers a 30-second wait
-followed by at most one reload per run. Threadlamp never clicks Retry or resends
-the interrupted prompt. It also watches for these errors when a partial response
-has left Logic Mode waiting for its final flag. Text quoted inside a chat response
-does not trigger recovery.
+and one initial reload. The empty-page error **Could not load this ChatGPT
+conversation** can also trigger this recovery. Threadlamp never clicks Retry or
+resends the interrupted prompt. Text quoted inside a chat response does not
+trigger recovery.
 
-After reload, it allows up to 60 seconds for the conversation to load and verifies
-the last user message by its message ID and a hash. It restores the message count
-and settings, monitors an ongoing response, or processes a completed response's
-Logic flag. The reload itself does not consume a follow-up.
+If that conversation-loading error persists after reload, Threadlamp makes up to
+four additional attempts, waiting 30, 60, 120 and 120 seconds between them. The
+whole retry sequence is limited to ten minutes from the initial recovery reload.
+The status shows the attempt number and delay. If the page loads during a wait,
+Threadlamp verifies it without doing the next reload.
 
-Another error, a missing or changed message, or a page that does not recover leaves
-Logic Mode visibly paused. Drafts and queued instructions also pause recovery so
-they are not lost. Stop cancels reconnection without sending a shutdown prompt.
-An unrelated page reload restores a recent checkpoint in a paused state for review.
-Checkpoints expire after ten minutes without updates and are not a permanent backup.
+After loading, Threadlamp verifies the conversation URL and last submitted message
+by its message ID and a hash. It restores the message count and settings, monitors
+an ongoing response, or processes a completed response's Logic flag. Reloading
+does not consume a follow-up. A page without a recognized loading error has up to
+60 seconds to provide the matching conversation before recovery pauses.
+
+Other errors, a changed message, or exhausted retries leave Logic Mode visibly
+paused. Drafts and queued instructions also pause recovery so they are not lost.
+**Stop** cancels recovery without sending a shutdown prompt. An unrelated manual
+reload restores a recent checkpoint in a paused state for review. Checkpoints
+expire after ten minutes without updates and are not a permanent backup.
+
+This requires a checkpoint from a running Logic cycle. A chat already stopped by
+an older version's recovery error cannot recover its discarded checkpoint: once
+the page loads, use **Resume** in the popup's Logic Mode section or **Resume after
+reload** in the dashboard to observe its existing response without sending startup
+instructions.
 
 ## Prompt queue
 

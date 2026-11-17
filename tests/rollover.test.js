@@ -47,6 +47,7 @@ function exposeContentFunctions(source) {
       startClaimedLogicRollover,
       findConnectionErrorNotice,
       connectionErrorResponse,
+      findConversationLoadError,
       recoverConnectionError,
       checkpointLogicRun,
       restoreLogicReconnect,

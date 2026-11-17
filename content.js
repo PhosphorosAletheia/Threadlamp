@@ -290,8 +290,25 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     return candidates.size === 1 ? [...candidates][0] : null;
   }
 
+  function findConversationLoadError() {
+    // The app's loading failure has no composer or conversation turns. Never
+    // interpret a quoted error in a loaded transcript as permission to reload.
+    if (findComposer() || latestMessageSnapshot("user").element || latestMessageSnapshot("assistant").element) return null;
+    const roots = [...document.querySelectorAll("main, [role='main'], [role='alert']")];
+    if (!roots.length) roots.push(document.body);
+    for (const root of roots) {
+      for (const node of [root, ...(root.querySelectorAll?.("h1, h2, h3, p, div, span") || [])]) {
+        if (/^could not load this chatgpt conversation[.]?$/.test(normalizeText(node.textContent)) && isVisible(node)
+          && !node.closest("article, [data-message-author-role], [data-user-message-bubble], .markdown, .prose, [contenteditable='true']")) return node;
+      }
+    }
+    return null;
+  }
+
   function connectionErrorResponse() {
     if (state.mode !== "logic" || isGenerating()) return null;
+    const loadingError = findConversationLoadError();
+    if (loadingError) return {connectionError: true, notice: loadingError, element: null, text: "", reason: "conversation_load_failed"};
     const notice = findConnectionErrorNotice();
     return notice ? { connectionError: true, notice, element: null, text: "",
       reason: normalizeText(notice.textContent).includes(STREAM_ERROR_MESSAGE) ? "message_stream_error" : "delivery_timeout" } : null;
@@ -528,7 +545,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
         if (!state.running || state.runId !== runId) return null;
         if (window.location.href !== url || !state.paused || isGenerating()
           || queuedPrompts[0] || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
-          || findConnectionErrorNotice() !== response.notice) {
+          || connectionErrorResponse()?.notice !== response.notice) {
           throw new Error("The chat changed while preparing reconnection. Inspect it before resuming.");
         }
         await sleep(POLL_MS);
@@ -537,7 +554,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       if (!result?.ok) throw new Error(result?.error || "Reconnection could not be prepared.");
       if (!state.running || state.runId !== runId || window.location.href !== url || !state.paused
         || isGenerating() || queuedPrompts[0] || queuedPromptInFlight || composerText(findComposer()) || snapshotChanged(latestMessageSnapshot("user"), userBeforeReload)
-          || findConnectionErrorNotice() !== response.notice) {
+          || connectionErrorResponse()?.notice !== response.notice) {
         await reconnectMessage("LR_CLEAR");
         if (state.runId === runId) throw new Error("The chat changed before reload. Inspect it before resuming.");
         return null;
@@ -550,6 +567,41 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       if (state.runId === runId) pauseReconnect(error.message);
       return null;
     } finally { reconnectPending = false; }
+  }
+
+  async function retryConversationLoad(runId, record, url) {
+    const delays = [30000, 60000, 120000, 120000];
+    const attempt = record.loadRetries || 0;
+    const recoveryStartedAt = record.recoveryStartedAt ?? Date.now();
+    if (attempt >= delays.length || Date.now() - recoveryStartedAt >= 600000) {
+      throw new Error("Conversation-load recovery reached its retry or ten-minute limit. Inspect the page before resuming.");
+    }
+    const current = () => controllerLive() && state.running && state.runId === runId && window.location.href === url;
+    const safe = () => !isGenerating() && !composerText(findComposer()) && !queuedPrompts[0] && !queuedPromptInFlight;
+    if (!safe()) throw new Error("A draft, queued message or active response needs review before another reload.");
+    state.paused = true;
+    setDetail(`Conversation could not load. Reload attempt ${attempt + 1} of ${delays.length} in ${delays[attempt] / 1000} seconds; no prompt will be resent…`);
+    recordDiagnostic("reconnect_start", {reason: "conversation_load_failed", retryAttempt: attempt + 1});
+    const started = Date.now();
+    while (Date.now() - started < delays[attempt]) {
+      if (!current()) return true;
+      if (!state.paused || !safe()) throw new Error("The chat or queue changed while waiting to reload; its draft and messages were preserved.");
+      if (!findConversationLoadError()) { state.paused = false; return false; }
+      await sleep(POLL_MS);
+    }
+    if (!current()) return true;
+    if (!state.paused || !safe()) throw new Error("The chat or queue changed before reload.");
+    if (!findConversationLoadError()) { state.paused = false; return false; }
+    const result = await reconnectMessage("LR_RETRY_LOAD", {token: record.token});
+    if (!result?.ok) throw new Error(result?.error || "The next reload could not be saved.");
+    if (!current() || !state.paused || !safe() || !findConversationLoadError()) {
+      await reconnectMessage("LR_CLEAR");
+      if (current()) throw new Error("The page changed while saving the reload. Inspect it before resuming.");
+      return true;
+    }
+    requireController();
+    window.location.reload();
+    return true;
   }
 
   async function restoreLogicReconnect() {
@@ -570,10 +622,15 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       if (!record.settings.verifiedUser) { pauseReconnect("The last submitted message could not be verified. Inspect the recovered chat before resuming."); return; }
       if (!record.requested) { pauseReconnect("The previous Logic run was interrupted. Inspect the chat and resume manually."); return; }
       setDetail("Reconnected. Waiting for the saved conversation to load without sending a prompt…");
-      const started = Date.now();
+      let started = Date.now();
       let readySince = null;
       while (state.running && state.runId === runId && Date.now() - started < 60000) {
         if (window.location.href !== url) throw new Error("The conversation changed after reload.");
+        if (findConversationLoadError()) {
+          if (await retryConversationLoad(runId, record, url)) return;
+          started = Date.now(); readySince = null;
+          continue;
+        }
         if (findConnectionErrorNotice() || hasMaximumLengthNotice()) throw new Error("ChatGPT reported another error after reload.");
         if (reconnectPageError()) throw new Error("ChatGPT reported another error after reload.");
         const user = latestMessageSnapshot("user"), composer = findComposer();

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.21.0 beta 1
+
+- Recognize ChatGPT's “Could not load this ChatGPT conversation” page during an active Logic run or its recovery. Retry failed loads with up to four additional reloads, spaced 30, 60, 120 and 120 seconds apart, within a ten-minute recovery window.
+- Preserve the original conversation, submitted-message verification, settings and count across reloads. Resume by observing the recovered response, without pressing Retry or replaying the interrupted prompt.
+- Cancel recovery for drafts, queued instructions, navigation, Stop or other errors. Persist the retry budget across pages and record sanitized load-failure diagnostics.
+
 ## 1.20.1 beta 1
 
 - Allow an explicit server setup in an inactive chat when an older response ended with USER_INPUT. Keep active input waits, drafts, pauses, errors and running responses protected.

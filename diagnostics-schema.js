@@ -8,7 +8,7 @@
     "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored", "page_hidden", "overlay_restored",
     "summary_start", "summary_ready", "summary_error", "summary_skipped", "rewrite_ready", "rewrite_error", "queue_error", "queue_move_retry", "update_restored", "update_resume_blocked"]);
   const reasons = new Set(["none", "other", "chat_changed", "project_changed", "draft_changed", "high_thinking",
-    "context_invalidated", "receipt_rejected", "delivery_timeout", "message_stream_error", "send_unavailable", "handoff_unverified", "handoff_sender", "reconnect_sender", "logic_flag_missing",
+    "context_invalidated", "receipt_rejected", "delivery_timeout", "message_stream_error", "conversation_load_failed", "send_unavailable", "handoff_unverified", "handoff_sender", "reconnect_sender", "logic_flag_missing",
     "notification_failed", "server_error", "conversation_limit", "summary_timeout", "summary_network",
     "summary_cancelled", "summary_response", "summary_rate_limit", "summary_cooldown", "summary_access",
     "summary_http", "summary_busy", "summary_size", "summary_settings", "summary_internal", "queue_storage",
@@ -36,6 +36,7 @@
       ["reconnect_sender", /untrusted reconnection request/i],
       ["logic_flag_missing", /no valid final flag/i],
       ["message_stream_error", /error in message stream/i],
+      ["conversation_load_failed", /could not load this chatgpt conversation|conversation-load recovery/i],
       ["context_invalidated", /extension context invalidated/i], ["chat_changed", /chat changed|left the scheduled conversation/i],
       ["project_changed", /project (?:changed|ID)|same project|same-project/i], ["draft_changed", /draft|message box/i],
       ["high_thinking", /high|thinking/i], ["receipt_rejected", /receipt|handoff.*(?:expired|cancelled)/i],

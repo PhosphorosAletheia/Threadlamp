@@ -81,7 +81,81 @@ function fixture(outcomes = ["idle"], options = {}) {
   });
 }
 
+async function conversationLoadTests() {
+  const message = "Could not load this ChatGPT conversation";
+  const roots = "main, [role='main'], [role='alert']";
+  function failPage(f) {
+    const notice = visibleElement(message);
+    f.setSelector("#prompt-textarea", []);
+    f.api.setTimeoutSnapshotsForTest(() => ({element:null,text:""}));
+    f.setSelector(roots,[notice]);
+    return notice;
+  }
+  let f=fixture();f.hide();
+  await f.api.checkpointLogicRun();
+  const notice=failPage(f);
+  assert.equal(f.api.connectionErrorResponse().reason,"conversation_load_failed");
+  let reloads=0;f.window.location.reload=()=>{reloads++;};
+  await f.api.recoverConnectionError(1,f.api.connectionErrorResponse());
+  assert.equal(reloads,1);assert.equal(f.sends.length,0);
+  // Text in a loaded conversation, prose, or a hidden notice cannot trigger it.
+  for(const kind of ["composer","message","prose","hidden","different-text"]) {
+    f=fixture();f.hide();const n=failPage(f);
+    if(kind==="composer")f.setSelector("#prompt-textarea",[f.composer]);
+    if(kind==="message")f.api.setTimeoutSnapshotsForTest(()=>({element:f.user(),text:message}));
+    if(kind==="prose")n.closest=()=>({});
+    if(kind==="hidden")n.getBoundingClientRect=()=>({width:0,height:0});
+    if(kind==="different-text")n.textContent="A discussion of: "+message;
+    assert.equal(f.api.findConversationLoadError(),null,kind);
+  }
+  for(const kind of ["retry-0","retry-1","retry-2","retry-3","exhausted","deadline","loaded","stop","navigate","draft","queued","resume","storage-failure","late-draft"]) {
+    f=fixture();f.hide();
+    const settings={message:"Configured followup",limit:5,count:3,rolloverEnabled:true,verifiedUser:true,
+      userHash:await f.api.reconnectUserHash({element:f.user(),text:f.user().textContent})};
+    const record={token:"load-run",attempted:true,requested:true,settings,loadRetries:kind==="exhausted"?4:Number(kind.split("-")[1])||0,recoveryStartedAt:0};
+    const pageError=failPage(f);
+    if(kind==="deadline")f.advanceClock(600001);
+    f.api.state.running=false;f.api.state.mode="idle";
+    const runs=f.api.captureHeartbeatRunsForTest();let reloadCount=0,reloadAt=0;
+    f.window.location.reload=()=>{reloadCount++;};
+    f.setRequestHandler(async r=>{
+      if(r.type==="LR_CLAIM")return {ok:true,record};
+      if(r.type==="LR_RETRY_LOAD") {
+        if(kind==="late-draft")f.setSelector("#prompt-textarea",[Object.assign(f.composer,{innerText:"Keep draft"})]);
+        return kind==="storage-failure"?{ok:false,error:"Storage unavailable"}:{ok:true,loadRetries:record.loadRetries+1};
+      }
+      return {ok:true};
+    });
+    let changed=false;
+    f.onTick(now=>{
+      reloadAt=now;
+      if(changed)return;changed=true;
+      if(kind==="stop"){f.api.state.running=false;f.api.state.runId++;}
+      if(kind==="resume")f.api.state.paused=false;
+      if(kind==="navigate")f.window.location=new URL("https://chatgpt.com/c/elsewhere");
+      if(kind==="draft")f.setSelector("#prompt-textarea",[Object.assign(f.composer,{innerText:"Keep draft"})]);
+      if(kind==="queued")f.api.queueAdditionalPrompt("Keep queued instruction");
+      if(kind==="loaded"){
+        f.setSelector(roots,[]);f.setSelector("#prompt-textarea",[f.composer]);
+        f.api.setTimeoutSnapshotsForTest(role=>{const element=role==="user"?f.user():f.assistant();return {element,text:element.textContent};});
+      }
+    });
+    await f.api.restoreLogicReconnect();
+    if(kind.startsWith("retry-")) {
+      assert.equal(reloadCount,1,kind);assert.equal(runs.length,0);
+      assert.ok(reloadAt >= [30000,60000,120000,120000][record.loadRetries],kind);
+      assert.equal(f.api.state.count,3);assert.equal(f.api.state.paused,true);
+    } else {
+      assert.equal(reloadCount,0,kind);
+      assert.equal(runs.length,kind==="loaded"?1:0,kind);
+      if(!["loaded","stop","navigate"].includes(kind))assert.equal(f.api.state.logicPhase,"recovery_paused",kind);
+    }
+    assert.deepEqual(f.sends,[],kind);assert.deepEqual(f.writes,[],kind);
+  }
+}
+
 async function runTests() {
+  await conversationLoadTests();
   let f = fixture();
   let reloads = 0;
   f.window.location.reload = () => { reloads++; };
