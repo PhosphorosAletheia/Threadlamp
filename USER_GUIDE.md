@@ -46,8 +46,8 @@ conversation** starts recovery after 20 seconds. Threadlamp never clicks Retry o
 resends the interrupted prompt. Text quoted inside a chat response does not
 trigger recovery.
 
-While that conversation-loading error persists, Threadlamp waits 20 seconds and
-reloads again until the conversation loads. There is no attempt cap or total
+If the recovery page remains blank, only partly loads, or shows that loading
+error, Threadlamp waits 20 seconds and reloads again until the conversation loads. There is no attempt cap or total
 time limit. The status shows the attempt number; **Stop recovery** on the page
 (or **Stop** in the dashboard or popup) cancels recovery. If the page loads during
 a wait, Threadlamp verifies it without doing the next reload.
@@ -55,8 +55,9 @@ a wait, Threadlamp verifies it without doing the next reload.
 After loading, Threadlamp verifies the conversation URL and last submitted message
 by its message ID and a hash. It restores the message count and settings, monitors
 an ongoing response, or processes a completed response's Logic flag. Reloading
-does not consume a follow-up. A page without a recognized loading error has up to
-60 seconds to provide the matching conversation before recovery pauses.
+does not consume a follow-up. Blank or partially loaded pages no longer hit a
+60-second verification cutoff. If a loaded conversation still has a different
+last submitted message after a minute of verification, recovery pauses for review.
 
 Other errors or a changed message leave Logic Mode visibly paused. Drafts and queued instructions also pause recovery so they are not lost.
 **Stop** cancels recovery without sending a shutdown prompt. An unrelated manual

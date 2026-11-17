@@ -570,11 +570,26 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     } finally { reconnectPending = false; }
   }
 
+  function reconnectPageNeedsLoad() {
+    // Only used after claiming a verified, planned recovery. The loading shell
+    // can omit the error banner, or render its composer before its saved turns.
+    const user = latestMessageSnapshot("user");
+    return Boolean(findConversationLoadError() || !findComposer() || !user.element || !user.text);
+  }
+
+  function assertReconnectPageHasNoOtherError() {
+    if (!findConversationLoadError() && (findConnectionErrorNotice() || hasMaximumLengthNotice() || reconnectPageError())) {
+      throw new Error("ChatGPT reported another error after reload.");
+    }
+  }
+
   async function retryConversationLoad(runId, record, url) {
     const delay = 20000;
     const attempt = record.loadRetries || 0;
     const current = () => controllerLive() && state.running && state.runId === runId && window.location.href === url;
-    const safe = () => !isGenerating() && !composerText(findComposer()) && !queuedPrompts[0] && !queuedPromptInFlight;
+    const untouched = () => !composerText(findComposer()) && !queuedPrompts[0] && !queuedPromptInFlight;
+    const safe = () => !isGenerating() && untouched();
+    assertReconnectPageHasNoOtherError();
     if (!safe()) throw new Error("A draft, queued message or active response needs review before another reload.");
     state.paused = true;
     setDetail(`Conversation could not load. Reload attempt ${attempt + 1} in 20 seconds; retrying until it loads. Stop cancels recovery. No prompt will be resent.`);
@@ -582,20 +597,25 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     const started = Date.now();
     while (Date.now() - started < delay) {
       if (!current()) return true;
-      if (!state.paused || !safe()) throw new Error("The chat or queue changed while waiting to reload; its draft and messages were preserved.");
-      if (!findConversationLoadError()) { state.paused = false; return false; }
+      if (!state.paused || !untouched()) throw new Error("The chat or queue changed while waiting to reload; its draft and messages were preserved.");
+      assertReconnectPageHasNoOtherError();
+      if (!reconnectPageNeedsLoad()) { state.paused = false; return false; }
+      if (isGenerating()) throw new Error("An active response needs review before another reload.");
       await sleep(POLL_MS);
     }
     if (!current()) return true;
-    if (!state.paused || !safe()) throw new Error("The chat or queue changed before reload.");
-    if (!findConversationLoadError()) { state.paused = false; return false; }
+    if (!state.paused || !untouched()) throw new Error("The chat or queue changed before reload.");
+    assertReconnectPageHasNoOtherError();
+    if (!reconnectPageNeedsLoad()) { state.paused = false; return false; }
+    if (isGenerating()) throw new Error("An active response needs review before another reload.");
     const result = await reconnectMessage("LR_RETRY_LOAD", {token: record.token});
     if (!result?.ok) throw new Error(result?.error || "The next reload could not be saved.");
-    if (!current() || !state.paused || !safe() || !findConversationLoadError()) {
+    if (!current() || !state.paused || !safe() || !reconnectPageNeedsLoad()) {
       await reconnectMessage("LR_CLEAR");
       if (current()) throw new Error("The page changed while saving the reload. Inspect it before resuming.");
       return true;
     }
+    assertReconnectPageHasNoOtherError();
     requireController();
     window.location.reload();
     return true;
@@ -619,34 +639,38 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
       if (!record.settings.verifiedUser) { pauseReconnect("The last submitted message could not be verified. Inspect the recovered chat before resuming."); return; }
       if (!record.requested) { pauseReconnect("The previous Logic run was interrupted. Inspect the chat and resume manually."); return; }
       setDetail("Reconnected. Waiting for the saved conversation to load without sending a prompt…");
-      let started = Date.now();
-      let readySince = null;
-      while (state.running && state.runId === runId && Date.now() - started < 60000) {
+      let readySince = null, mismatchSince = null;
+      while (state.running && state.runId === runId) {
         if (window.location.href !== url) throw new Error("The conversation changed after reload.");
-        if (findConversationLoadError()) {
+        assertReconnectPageHasNoOtherError();
+        if (reconnectPageNeedsLoad()) {
           if (await retryConversationLoad(runId, record, url)) return;
-          started = Date.now(); readySince = null;
+          readySince = null; mismatchSince = null;
           continue;
         }
-        if (findConnectionErrorNotice() || hasMaximumLengthNotice()) throw new Error("ChatGPT reported another error after reload.");
-        if (reconnectPageError()) throw new Error("ChatGPT reported another error after reload.");
         const user = latestMessageSnapshot("user"), composer = findComposer();
         if (composerText(composer)) throw new Error("A draft is present after reload; it has been preserved.");
         const matches = Boolean(composer && user.element && user.text && await reconnectUserHash(user) === record.settings.userHash);
         if (!state.running || state.runId !== runId) return;
         if (window.location.href !== url || composerText(findComposer())) throw new Error("The chat or draft changed while verifying reconnection.");
-        if (snapshotChanged(latestMessageSnapshot("user"), user)) { readySince = null; await sleep(POLL_MS); continue; }
+        if (snapshotChanged(latestMessageSnapshot("user"), user)) { readySince = null; mismatchSince = null; await sleep(POLL_MS); continue; }
         if (matches) {
+          mismatchSince = null;
           readySince ??= Date.now();
           if (Date.now() - readySince >= ACTIVITY_WINDOW_MS) {
             reconnectRestoring = false;
             void runLogicMode(runId, true);
             return;
           }
-        } else readySince = null;
+        } else {
+          readySince = null;
+          mismatchSince ??= Date.now();
+          if (Date.now() - mismatchSince >= 60000) {
+            throw new Error("The loaded conversation's last submitted message does not match the saved recovery checkpoint. Inspect it before resuming.");
+          }
+        }
         await sleep(POLL_MS);
       }
-      if (state.runId === runId && state.running) throw new Error("The saved conversation could not be verified within 60 seconds of reload.");
     } catch (error) {
       if (window.location.href === url && state.runId >= priorRun && state.logicPhase === "reconnecting") pauseReconnect(error.message);
     } finally { reconnectRestoring = false; }

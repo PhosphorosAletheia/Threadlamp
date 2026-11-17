@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.21.2 beta 1
+
+- Fix the remaining 60-second pause when a planned recovery reaches a blank or partially loaded page instead of the exact conversation-loading error banner. Retry these pages every 20 seconds without an attempt or total time limit.
+- Verify the loaded conversation before resuming Logic Mode, including when a response is still running. Preserve Stop, draft, queue, changed-message and other-error protections.
+
 ## 1.21.1 beta 1
 
 - Retry “Could not load this ChatGPT conversation” every 20 seconds until it loads, without an attempt cap or total recovery timeout. Preserve the verified recovery checkpoint during extended outages or browser suspension.
