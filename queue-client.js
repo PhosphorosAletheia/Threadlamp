@@ -33,7 +33,9 @@ globalThis.ThreadlampQueueStore = class {
   async request(type, extra = {}) {
     if (this.closed) throw new Error("The old queue controller has stopped.");
     const result = await chrome.runtime.sendMessage({type, url:this.url, version:this.version, ...extra});
-    if (!result?.ok || !Number.isInteger(result.version) || !Array.isArray(result.items)) throw Object.assign(new Error(result?.error || "The queue could not be saved. Reload the chat before resuming."), {queueOperation:type,queueFailure:result?.queueFailure || "storage"});
+    if (!result?.ok || !Number.isInteger(result.version) || !Array.isArray(result.items)) throw Object.assign(new Error(result?.error || "The queue could not be saved. Reload the chat before resuming."),
+      {queueOperation:type,queueFailure:result?.queueFailure || "storage",queueProof:result?.queueProof,
+        queueRetrySafe:result?.ok === false && result?.queueRetrySafe === true});
     if (this.closed) throw new Error("The old queue controller has stopped.");
     this.version = result.version; return result;
   }
@@ -57,13 +59,25 @@ globalThis.ThreadlampQueueStore = class {
       return this.request("Q_SAVE", {items:snapshot});
     });
   }
-  move() {
+  move({validate, onRetry} = {}) {
     const destination = window.location.href;
     return this.enqueue(async () => {
       const previous = this.url;
       if (previous === destination) return;
       this.url = destination;
-      await this.request("Q_MOVE", {from:previous});
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (this.closed || window.location.href !== destination || validate && !validate()) {
+          throw new Error("The chat or submitted prompt changed while transferring its queue. No further queue transfer was attempted.");
+        }
+        try {await this.request("Q_MOVE", {from:previous});return;}
+        catch (error) {
+          // Refresh browser sender metadata only after an explicit rejection
+          // before storage access. Keep the exact source, destination and revision.
+          if (attempt === 2 || !validate || !error.queueRetrySafe || !["route", "document"].includes(error.queueFailure)) throw error;
+          if (onRetry) onRetry(error, attempt + 1);
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+      }
     });
   }
   handoff(requestId) {

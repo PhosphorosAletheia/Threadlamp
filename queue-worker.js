@@ -73,6 +73,7 @@
       || new URL(sender.tab.url).origin !== new URL(request.url).origin) {
       throw failure("sender", "The queue's current conversation could not be verified. Reload it before resuming.");
     }
+    let proofFailure = "unavailable";
     try {
       const results = await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[sender.documentId]},
         func:() => ({url:location.href,top:window === window.top})});
@@ -80,13 +81,23 @@
       const latest = await chrome.tabs.get(tab.id);
       if (proof?.documentId === sender.documentId && proof.frameId === 0 && proof.result?.top === true
         && cleanUrl(proof.result.url) === cleanUrl(request.url) && cleanUrl(latest.url) === cleanUrl(request.url)) return latest;
+      proofFailure = !proof ? "missing" : proof.documentId !== sender.documentId ? "identity"
+        : proof.frameId !== 0 ? "frame" : proof.result?.top !== true ? "top"
+        : cleanUrl(proof.result.url) !== cleanUrl(request.url) ? "route" : "tab";
     } catch { /* A missing or replaced document cannot own the queue. */ }
-    throw failure("document", "The queue's active page changed or could not be verified. Reload the correct conversation before resuming.");
+    throw Object.assign(failure("document", "The queue's active page changed or could not be verified. Reload the correct conversation before resuming."), {queueProof:proofFailure});
   }
   async function handle(request, sender) {
     await initializationPromise;
     return serial(async () => {
-      const tab = await verifyPage(request, sender);
+      let tab;
+      try {tab = await verifyPage(request, sender);}
+      catch (error) {
+        // Only this rejection is known to precede all queue reads and writes.
+        // A fresh Q_MOVE may re-prove ownership; never replay uncertain writes.
+        if (request.type === "Q_MOVE" && ["route", "document"].includes(error.queueFailure)) error.queueRetrySafe = true;
+        throw error;
+      }
       const all = (await chrome.storage.local.get(KEY))[KEY] || {};
       const current = storedIdentity(identity(request.url, tab.id), all);
       const existing = entry(all, current.key);
@@ -124,7 +135,8 @@
   }
   chrome.runtime.onMessage.addListener((request, sender, respond) => {
     if (!String(request?.type || "").startsWith("Q_")) return false;
-    handle(request, sender).then(respond, error => respond({ok:false, error:error.message || "Could not save the queue. No message was sent.", queueFailure:error.queueFailure || "storage"}));
+    handle(request, sender).then(respond, error => respond({ok:false, error:error.message || "Could not save the queue. No message was sent.",
+      queueFailure:error.queueFailure || "storage", queueProof:error.queueProof, queueRetrySafe:error.queueRetrySafe === true}));
     return true;
   });
 })();

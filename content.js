@@ -2471,7 +2471,7 @@ ${LOGIC_START_PROMPT}
   }, error => {
     if (!controllerLive()) return;
     state.running = false; state.error = true; state.runId += 1;
-    recordDiagnostic("queue_error", {reason:"queue_storage", queueOperation:error.queueOperation, queueFailure:error.queueFailure});
+    recordDiagnostic("queue_error", {reason:"queue_storage", queueOperation:error.queueOperation, queueFailure:error.queueFailure, queueProof:error.queueProof});
     setDetail(`Queue storage error: ${error.message}`, true, true);
   });
   function persistQueue() {return queueStore.save(queuedPrompts);}
@@ -3033,7 +3033,14 @@ ${LOGIC_START_PROMPT}
         || Date.now() <= submitted.deadline + SEND_ENABLE_TIMEOUT_MS);
       if (matchesSubmission(user) && (!submitted.verifiedUserId || messageId === submitted.verifiedUserId)
         && (beforeDeadline || lateEvidence)) {
-        await queueStore.move();
+        await queueStore.move({
+          validate: () => controllerLive() && state.running && !state.paused && state.runId === runId
+            && owner === runOwnership && owner.submitted === submitted && candidate() && chatIdentity() === destinationIdentity
+            && matchesSubmission(latestMessageSnapshot("user"))
+            && (!messageId || messageSnapshotId(latestMessageSnapshot("user")) === messageId),
+          onRetry: (error, retryAttempt) => recordDiagnostic("queue_move_retry", {reason:"queue_storage", queueOperation:"Q_MOVE",
+            queueFailure:error.queueFailure, queueProof:error.queueProof, retryAttempt})
+        });
         if (!state.running || state.runId !== runId) return;
         if (owner !== runOwnership || chatIdentity() !== destinationIdentity || !matchesSubmission(latestMessageSnapshot("user"))) {
           throw new Error("The chat changed while saving its queue. Automatic sending stopped.");

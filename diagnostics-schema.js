@@ -6,7 +6,7 @@
   const events = new Set(["loaded", "state", "error", "handoff_prepare", "handoff_claimed", "handoff_verified",
     "draft_cleared", "thinking_verified", "prompt_written", "send_attempt", "send_observed", "handoff_complete", "handoff_receipt_retry",
     "identity_adopted", "identity_rejected", "reconnect_start", "reconnect_restored", "page_hidden", "overlay_restored",
-    "summary_start", "summary_ready", "summary_error", "summary_skipped", "rewrite_ready", "rewrite_error", "queue_error"]);
+    "summary_start", "summary_ready", "summary_error", "summary_skipped", "rewrite_ready", "rewrite_error", "queue_error", "queue_move_retry"]);
   const reasons = new Set(["none", "other", "chat_changed", "project_changed", "draft_changed", "high_thinking",
     "context_invalidated", "receipt_rejected", "delivery_timeout", "message_stream_error", "send_unavailable", "handoff_unverified", "handoff_sender", "reconnect_sender", "logic_flag_missing",
     "notification_failed", "server_error", "conversation_limit", "summary_timeout", "summary_network",
@@ -54,6 +54,7 @@
     for (const key of booleans) if (typeof input[key] === "boolean") out[key] = input[key];
     if (["Q_LOAD", "Q_SAVE", "Q_MOVE", "Q_HANDOFF"].includes(input.queueOperation)) out.queueOperation = input.queueOperation;
     if (["sender", "route", "document", "storage"].includes(input.queueFailure)) out.queueFailure = input.queueFailure;
+    if (["unavailable", "missing", "identity", "frame", "top", "route", "tab"].includes(input.queueProof)) out.queueProof = input.queueProof;
     if (Array.isArray(input.frames)) out.frames = input.frames.slice(0,5)
       .filter(frame => frame && frame.file === "content.js" && Number.isInteger(frame.line) && frame.line > 0 && frame.line <= 100000
         && Number.isInteger(frame.column) && frame.column >= 0 && frame.column <= 100000)

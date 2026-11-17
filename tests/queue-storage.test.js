@@ -9,7 +9,7 @@ const req=(h,type,data={},id=17)=>h.dispatch({type,url:h.tabs.get(id).url,...dat
 const message={id:"message-one",text:"Review costs before continuing."};
 async function client(h,id=17) {
   let restored=[],failure=null;
-  const context={URL,Promise,window:{location:{href:h.tabs.get(id).url}},chrome:{runtime:{sendMessage:r=>h.dispatch(r,sender(h,id))}}};
+  const context={URL,Promise,setTimeout,window:{location:{href:h.tabs.get(id).url}},chrome:{runtime:{sendMessage:r=>h.dispatch(r,sender(h,id))}}};
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(require.resolve("../queue-client.js"),"utf8")+"\nglobalThis.Store=ThreadlampQueueStore;",context);
   const store=new context.Store(items=>{restored=items;},error=>{failure=error;});
@@ -158,6 +158,66 @@ test("stale sender tab metadata requires exact active-document proof and the liv
   assert.equal(h.local.values[KEY],undefined,"failed checks never mutate queues");
 });
 
+test("queue migration retries rejected verification with fresh sender proof, never a queue write",async()=>{
+  const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project");
+  h.tabs.get(17).url=home;
+  const c=await client(h);await c.store.save([message]);
+  c.context.window.location.href=h.tabs.get(17).url=sourceUrl;
+  let calls=0,writes=0;const retries=[],set=h.local.set;
+  h.local.set=async data=>{if(data[KEY])writes++;return set(data);};
+  h.context.chrome.scripting={executeScript:async()=>{throw new Error("Document not ready");}};
+  c.context.chrome.runtime.sendMessage=r=>{
+    calls++;
+    const s=calls===1 ? {...sender(h),url:home,tab:{...h.tabs.get(17),url:home},documentId:"active-document",documentLifecycle:"active"} : sender(h);
+    return h.dispatch(r,s);
+  };
+  await c.store.move({validate:()=>true,onRetry:(error,attempt)=>retries.push([error.queueFailure,error.queueProof,attempt])});
+  assert.equal(c.failure,null);assert.equal(calls,2);assert.equal(writes,1);
+  assert.deepEqual(retries,[["document","unavailable",1]]);
+  assert.equal((await client(h)).restored[0].text,message.text);
+  h.tabs.get(17).url=home;
+  assert.equal((await req(h,"Q_LOAD")).items.length,0);
+});
+
+test("queue migration stops after bounded verification failures and preserves its source queue",async()=>{
+  const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project");
+  h.tabs.get(17).url=home;
+  const c=await client(h);await c.store.save([message]);
+  const before=JSON.stringify(h.local.values[KEY]);
+  c.context.window.location.href=h.tabs.get(17).url=sourceUrl;
+  let calls=0;
+  h.context.chrome.scripting={executeScript:async()=>[{documentId:"wrong-document",frameId:0,result:{url:sourceUrl,top:true}}]};
+  c.context.chrome.runtime.sendMessage=r=>{
+    calls++;return h.dispatch(r,{...sender(h),url:home,tab:{...h.tabs.get(17),url:home},documentId:"active-document",documentLifecycle:"active"});
+  };
+  await assert.rejects(c.store.move({validate:()=>true}),/active page/);
+  assert.equal(calls,3);assert.equal(c.failure.queueProof,"identity");
+  assert.equal(JSON.stringify(h.local.values[KEY]),before);
+});
+
+test("queue migration never retries uncertain results, storage failures, navigation or lost prompt ownership",async()=>{
+  for(const scenario of ["transport","missing","malformed","storage","sender","navigate","ownership","closed"]) {
+    const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project");
+    h.tabs.get(17).url=home;
+    const c=await client(h);await c.store.save([message]);
+    c.context.window.location.href=h.tabs.get(17).url=sourceUrl;
+    const before=JSON.stringify(h.local.values[KEY]);let calls=0,valid=true;
+    c.context.chrome.runtime.sendMessage=async()=>{
+      calls++;
+      if(scenario==="transport")throw new Error("Missing response");
+      if(scenario==="missing")return undefined;
+      if(scenario==="malformed")return {ok:true,queueRetrySafe:true};
+      if(scenario==="navigate")c.context.window.location.href=sourceUrl+"-other";
+      if(scenario==="ownership")valid=false;
+      if(scenario==="closed")c.store.close();
+      return {ok:false,error:"Rejected",queueFailure:scenario==="storage"?"storage":scenario==="sender"?"sender":"document",
+        queueRetrySafe:!["storage","sender"].includes(scenario)};
+    };
+    await assert.rejects(c.store.move({validate:()=>valid}));
+    assert.equal(calls,1,scenario);assert.equal(JSON.stringify(h.local.values[KEY]),before);
+  }
+});
+
 test("initial queue read follows navigation without applying an obsolete queue or retrying a write",async()=>{
   const home=sourceUrl.replace(/\/c\/source$/,"/project"),calls=[],loaded=[];
   const context={URL,Promise,window:{location:{href:home}},chrome:{runtime:{sendMessage:async r=>{
@@ -190,14 +250,23 @@ test("upgrading preserves a legacy temporary-ID queue and refuses to merge confl
 
 test("real Logic ownership and durable queue survive both new-chat URL transitions without resending startup",async()=>{
   const {fixture}=require("./delivery-timeout.test.js");
+  for (const rejectOnce of [false,true]) {
   const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project"),temporary=home.replace(/\/project$/,"/c/local-chatgpt%3Atemporary");
-  let f,store;
-  const context={URL,Promise,window:{get location(){return f?.window.location || new URL(home);}},
-    chrome:{runtime:{sendMessage:r=>{h.tabs.get(17).url=context.window.location.href;return h.dispatch(r,sender(h));}}}};
+  let f,store,rejected=false;
+  h.context.chrome.scripting={executeScript:async()=>{throw new Error("Document unavailable during navigation");}};
+  const context={URL,Promise,setTimeout,window:{get location(){return f?.window.location || new URL(home);}},
+    chrome:{runtime:{sendMessage:r=>{
+      h.tabs.get(17).url=context.window.location.href;
+      if(rejectOnce && !rejected && r.type==="Q_MOVE") {
+        rejected=true;
+        return h.dispatch(r,{...sender(h),url:home,tab:{...h.tabs.get(17),url:home},documentId:"active-document",documentLifecycle:"active"});
+      }
+      return h.dispatch(r,sender(h));
+    }}}};
   vm.createContext(context);vm.runInContext(fs.readFileSync(require.resolve("../queue-client.js"),"utf8"),context);
   class Store extends context.ThreadlampQueueStore {
     constructor(...args){super(...args);store=this;}
-    async move(){await super.move();if(this.url===temporary)f.onTick(()=>{f.window.location=new URL(sourceUrl);});}
+    async move(options){await super.move(options);if(this.url===temporary)f.onTick(()=>{f.window.location=new URL(sourceUrl);});}
   }
   f=fixture(["continue","idle"],{QueueStore:Store});f.hide();f.window.location=new URL(home);await store.ready;
   f.api.setTimeoutSnapshotsForTest(role=>{
@@ -209,4 +278,6 @@ test("real Logic ownership and durable queue survive both new-chat URL transitio
   assert.equal(f.api.state.error,false,f.api.state.detail);
   assert.deepEqual(f.sends,["Initial continuation","Configured followup"]);
   assert.equal(store.url,sourceUrl);
+  assert.equal(rejected,rejectOnce);
+  }
 });

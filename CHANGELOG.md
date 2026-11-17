@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.18.2 beta 1
+
+- Retry a new chat’s queue transfer up to two times when page verification explicitly rejects it before storage access. Recheck the same destination and submitted prompt before each attempt; never resend the startup prompt or retry an uncertain queue write.
+- Keep changed chats, projects, prompts and stopped controllers blocked. Preserve the queue if verification continues to fail.
+- Record the specific document-proof failure and retry attempts in private diagnostics without page contents or identifiers. Restart the LAN helper to retain these new diagnostic details in its report.
+
 ## 1.18.1 beta 1
 
 - Fix new-chat handoffs stopping when ChatGPT collapses the submitted prompt behind “Show more.” Exclude its verified display ellipsis from user-message reads without expanding the message or changing its contents.
