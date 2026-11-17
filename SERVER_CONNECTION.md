@@ -17,6 +17,11 @@ Chrome. A companion server is not included.
 5. If the chat was already sleeping, its heartbeat resumes. Otherwise select
    **Start logic** or **Start next cycle** to enable event processing.
 
+The popup verifies the selected conversation and its controller after permission
+is granted. If you navigate to another chat or verification fails, no setup is
+requested. Reopen the popup in the intended conversation and review its status.
+An existing project connection always uses recovery instead of a second setup.
+
 Setup waits for a finished reply; pauses between tool steps do not end the wait.
 It allows up to five follow-ups. The 15-minute setup lease renews while
 the same chat page and attempt remain active. Abandoned attempts expire.

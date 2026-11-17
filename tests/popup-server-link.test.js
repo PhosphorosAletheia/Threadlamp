@@ -31,7 +31,10 @@ const context = {
     permissionCalls++;
     assert.deepEqual(Array.from(request.origins), ["http://localhost/*", "http://127.0.0.1/*"]);
     return permission;
-  } } },
+  } }, tabs: {sendMessage:async (id,request)=>{
+    assert.equal(id,17);assert.equal(request.type,"DB_SNAPSHOT");
+    return {url:activeTab.url,instanceId:"popup-fixture",revision:"revision-one"};
+  }} },
   sendToBackground: async request => {
     requests.push(request);
     if (["SL_SETUP", "SL_RECOVER"].includes(request.type)) record = { enabled: true, phase: "setup", pending: 0, uncertain: [], url: activeTab.url };
@@ -72,6 +75,11 @@ const click = async id => { $(id).listeners.click(); await flush(); };
   assert.equal(record.enabled, false);
   assert.equal($("sl-setup").hidden, true);
   assert.equal($("sl-recover").disabled, false);
+  const beforeNavigationRecovery=requests.length;
+  await click("sl-recover");
+  assert.equal(requests.length,beforeNavigationRecovery,"changing the active tab cancels setup before dispatch");
+  assert.match($("sl-status").textContent,/selected conversation changed/);
+  activeTab={id:17,url:"https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef-research/c/one"};
   await click("sl-recover");
   assert.equal(requests.at(-1).type, "SL_RECOVER", "existing setup must never send the initial installation action");
   assert.equal(record.phase, "setup");

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.19.3 beta 1
+
+- Bind the popup’s Set up connection and Recover connection buttons to the selected conversation and verified controller revision. Stop if permission is denied, the selected chat changes, or controller verification fails.
+- Prevent repeated setup clicks while a request is pending. Never retry a missing setup reply automatically. Existing connections continue to use recovery rather than a second installation.
+
 ## 1.19.2 beta 1
 
 - Verify controller liveness inside the chat before replacing it after a failed or slow extension health-check reply. A healthy controller keeps its active Logic run or server recovery monitor.

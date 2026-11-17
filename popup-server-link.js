@@ -45,12 +45,32 @@
     }
   }
   function startSetup(recovering) {
+    if (busy || !tab) return;
+    const expectedTab = {id:tab.id, url:Heartbeat.canonicalUrl(tab.url)};
+    const recovery = recovering || Boolean(record);
+    const verifyTab = async () => {
+      const active = await getActiveTab();
+      if (active?.id !== expectedTab.id || Heartbeat.canonicalUrl(active?.url) !== expectedTab.url) {
+        throw new Error("The selected conversation changed. Reopen the popup in the intended chat before setting up its server.");
+      }
+    };
     // Request only loopback hosts, directly from the user's setup click.
     const permission = chrome.permissions.request({ origins: ["http://localhost/*", "http://127.0.0.1/*"] });
-    void action(async () => {
+    return action(async () => {
       if (!await permission) throw new Error("Local server permission was declined.");
-      await refreshStatus();
-      return request(recovering || record ? "SL_RECOVER" : "SL_SETUP");
+      await verifyTab();
+      // refreshStatus intentionally absorbs errors for display. A setup action
+      // must instead stop on failure and bind to this exact page and revision.
+      const attached = await sendToBackground({type:"AT_ATTACH", tabId:expectedTab.id});
+      if (!attached?.ok) throw new Error("Threadlamp could not verify this chat. Review its status before setup.");
+      await verifyTab();
+      const snapshot = await chrome.tabs.sendMessage(expectedTab.id, {type:"DB_SNAPSHOT"}, {frameId:0});
+      if (!snapshot?.instanceId || !snapshot.revision || Heartbeat.canonicalUrl(snapshot.url) !== expectedTab.url) {
+        throw new Error("The chat controller could not be verified. No server setup was requested.");
+      }
+      await verifyTab();
+      return request(recovery ? "SL_RECOVER" : "SL_SETUP", {target:{tabId:expectedTab.id,
+        url:snapshot.url,instanceId:snapshot.instanceId,revision:snapshot.revision}});
     });
   }
   $("sl-setup").addEventListener("click", () => startSetup(false));

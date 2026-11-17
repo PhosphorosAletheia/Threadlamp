@@ -788,7 +788,60 @@ async function recoverUpdatePauseTests() {
   }
 }
 
+async function setupButtonTests() {
+  const fs=require("node:fs"),vm=require("node:vm");
+  const h=await harness();
+  for(const kind of ["new","existing","recover","permission-denied","permission-error","navigated","tab-changed","attach-failed","missing-snapshot","snapshot-failed","late-navigation","lost-reply"]) {
+    const nodes=new Map(),calls=[];
+    const node=()=>({value:"",options:[],listeners:{},addEventListener(type,fn){this.listeners[type]=fn;},
+      replaceChildren(){this.options=[];},appendChild(n){this.options.push(n);}});
+    const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};
+    let active={id:17,url:sourceUrl};
+    const existing=kind==="existing"?{enabled:true,url:sourceUrl,phase:"connected",detail:"Connected",pending:0,uncertain:[]}:null;
+    const context={URL,Promise,document:{getElementById:get,createElement:node},
+      window:{addEventListener(){}},setInterval:()=>1,clearInterval(){},
+      Heartbeat:h.context.Heartbeat,ServerLink:h.context.ServerLink,
+      getActiveTab:async()=>({...active}),
+      refreshStatus:async()=>{throw Error("Setup must not use the error-absorbing status poll");},
+      sendToBackground:async r=>{
+        calls.push(r);
+        if(r.type==="SL_GET")return {ok:true,connection:existing};
+        if(r.type==="AT_ATTACH") {if(kind==="attach-failed")throw Error("No receiver");return {ok:true};}
+        if(kind==="lost-reply")throw Error("Reply lost");
+        return {ok:true,connection:existing};
+      },
+      chrome:{permissions:{request:async()=>{
+        if(kind==="permission-error")throw Error("Permission request failed");
+        if(kind==="navigated")active.url=sourceUrl+"-other";
+        if(kind==="tab-changed")active.id=99;
+        return kind!=="permission-denied";
+      }},tabs:{sendMessage:async(id,r)=>{
+        assert.equal(id,17);assert.equal(r.type,"DB_SNAPSHOT");
+        if(kind==="missing-snapshot")return undefined;
+        if(kind==="snapshot-failed")throw Error("No receiver");
+        if(kind==="late-navigation")active.url=sourceUrl+"-other";
+        return {url:sourceUrl,instanceId:"fixture-controller",revision:"fixture-revision"};
+      }}}
+    };
+    vm.createContext(context);vm.runInContext(fs.readFileSync(require.resolve("../popup-server-link.js"),"utf8"),context);
+    await new Promise(resolve=>setImmediate(resolve));
+    const button=get(kind==="recover"?"sl-recover":"sl-setup");
+    const pending=button.listeners.click();
+    button.listeners.click(); // A repeated click cannot dispatch a second setup.
+    await pending;
+    const setups=calls.filter(r=>["SL_SETUP","SL_RECOVER"].includes(r.type));
+    const expected=["new","existing","recover","lost-reply"].includes(kind);
+    assert.equal(setups.length,expected?1:0,kind);
+    if(expected) {
+      assert.equal(setups[0].type,["existing","recover"].includes(kind)?"SL_RECOVER":"SL_SETUP",kind);
+      assert.deepEqual(JSON.parse(JSON.stringify(setups[0].target)),{tabId:17,url:sourceUrl,instanceId:"fixture-controller",revision:"fixture-revision"});
+    }
+    assert.ok(!button.disabled || kind==="existing");
+  }
+}
+
 async function main() {
+  await setupButtonTests();
   await recoverUpdatePauseTests();
   await emptyInboxSendGuardsTests();
   await protocolTests(); await routingTests(); await failureTests(); await reconnectTests();
