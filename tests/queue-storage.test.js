@@ -248,17 +248,36 @@ test("upgrading preserves a legacy temporary-ID queue and refuses to merge confl
   assert.equal(JSON.stringify(conflict.local.values[KEY]),before);
 });
 
-test("real Logic ownership and durable queue survive both new-chat URL transitions without resending startup",async()=>{
+async function rolloverDuringQueueVerification(scenario) {
   const {fixture}=require("./delivery-timeout.test.js");
-  for (const rejectOnce of [false,true]) {
-  const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project"),temporary=home.replace(/\/project$/,"/c/local-chatgpt%3Atemporary");
-  let f,store,rejected=false;
+  const h=await harness(),home=sourceUrl.replace(/\/c\/source$/,"/project");
+  const temporary=home.replace(/\/project$/,"/c/local-chatgpt%3Atemporary");
+  const saved=home.replace(/\/project$/,"/c/12345678-1234-1234-1234-123456789abc");
+  let f,store,rejected=false,moves=0,writes=0;
+  const set=h.local.set;h.local.set=async data=>{if(data[KEY])writes++;return set(data);};
   h.context.chrome.scripting={executeScript:async()=>{throw new Error("Document unavailable during navigation");}};
   const context={URL,Promise,setTimeout,window:{get location(){return f?.window.location || new URL(home);}},
-    chrome:{runtime:{sendMessage:r=>{
+    chrome:{runtime:{sendMessage:async r=>{
       h.tabs.get(17).url=context.window.location.href;
-      if(rejectOnce && !rejected && r.type==="Q_MOVE") {
+      if(r.type==="Q_MOVE")moves++;
+      if(!["stable","save-before-request"].includes(scenario) && !rejected && r.type==="Q_MOVE") {
         rejected=true;
+        if(scenario==="lost-write-reply") {await h.dispatch(r,sender(h));throw new Error("Response lost");}
+        if(scenario==="save-during-success") {
+          const result=await h.dispatch(r,sender(h));f.window.location=new URL(saved);return result;
+        }
+        if(scenario!=="retry") {
+          let destination=saved;
+          if(scenario==="other-project")destination=saved.replace("0123456789abcdef0123456789abcdef","fedcba9876543210fedcba9876543210");
+          if(scenario==="saved-to-saved")destination=saved.replace("123456789abc","123456789def");
+          f.window.location=new URL(destination);
+          if(scenario==="different-prompt")f.user().textContent="A different task";
+          if(scenario==="different-id" || scenario==="missing-id") {
+            const get=f.user().getAttribute;f.user().getAttribute=name=>name==="data-message-id" ? (scenario==="missing-id"?null:"another-message") : get(name);
+          }
+          if(scenario==="stopped")f.api.stopLoop();
+          h.context.chrome.scripting={executeScript:async()=>[{documentId:"active-document",frameId:0,result:{url:destination,top:true}}]};
+        }
         return h.dispatch(r,{...sender(h),url:home,tab:{...h.tabs.get(17),url:home},documentId:"active-document",documentLifecycle:"active"});
       }
       return h.dispatch(r,sender(h));
@@ -266,18 +285,50 @@ test("real Logic ownership and durable queue survive both new-chat URL transitio
   vm.createContext(context);vm.runInContext(fs.readFileSync(require.resolve("../queue-client.js"),"utf8"),context);
   class Store extends context.ThreadlampQueueStore {
     constructor(...args){super(...args);store=this;}
-    async move(options){await super.move(options);if(this.url===temporary)f.onTick(()=>{f.window.location=new URL(sourceUrl);});}
+    async move(options){
+      const moving=super.move(options);
+      if(scenario==="save-before-request" && f.window.location.href===temporary)f.window.location=new URL(saved);
+      await moving;
+      if(this.url===temporary)f.onTick(()=>{f.window.location=new URL(saved);});
+    }
   }
   f=fixture(["continue","idle"],{QueueStore:Store});f.hide();f.window.location=new URL(home);await store.ready;
+  // Keep a durable unsent item while testing the independent run-identity path.
+  await store.save([message]);writes=0;
   f.api.setTimeoutSnapshotsForTest(role=>{
     if(!f.sends.length)return {element:null,text:""};
     const element=role==="user"?f.user():f.assistant();return {element,text:element.textContent};
   });
-  const send=f.send.click;f.send.click=()=>{send();if(f.sends.length===1)f.window.location=new URL(temporary);};
+  const send=f.send.click;f.send.click=()=>{send();if(f.sends.length===1)f.window.location=new URL(["saved-to-saved","lost-write-reply"].includes(scenario)?saved:temporary);};
   await f.api.runLogicMode(1,false,"Initial continuation");
-  assert.equal(f.api.state.error,false,f.api.state.detail);
-  assert.deepEqual(f.sends,["Initial continuation","Configured followup"]);
-  assert.equal(store.url,sourceUrl);
-  assert.equal(rejected,rejectOnce);
+  return {h,f,store,moves,writes,saved,home,rejected};
+}
+
+test("real Logic ownership and durable queue survive both new-chat URL transitions without resending startup",async()=>{
+  for (const scenario of ["stable", "retry", "save-before-request", "save-during-proof", "save-during-success"]) {
+    const {h,f,store,writes,saved,home}=await rolloverDuringQueueVerification(scenario);
+    assert.equal(f.api.state.error,false,f.api.state.detail);
+    assert.deepEqual(f.sends,["Initial continuation","Configured followup"]);
+    assert.equal(store.url,saved);assert.equal(writes,1,"one durable transfer");
+    h.tabs.get(17).url=saved;assert.equal((await client(h)).restored[0].text,message.text);
+    h.tabs.get(17).url=home;assert.equal((await client(h)).restored.length,0);
   }
+});
+
+test("temporary queue retargeting rejects changed projects, prompt text, message IDs, stopped runs and saved-chat navigation",async()=>{
+  for(const scenario of ["other-project","different-prompt","different-id","missing-id","stopped","saved-to-saved"]) {
+    const {h,f,moves,writes,home}=await rolloverDuringQueueVerification(scenario);
+    assert.equal(f.api.state.running,false,scenario);
+    assert.deepEqual(f.sends,["Initial continuation"],scenario);
+    assert.equal(moves,1,scenario);assert.equal(writes,0,scenario);
+    h.tabs.get(17).url=home;assert.equal((await client(h)).restored[0].text,message.text,scenario);
+  }
+});
+
+test("a lost queue-write reply never retries or replays the startup prompt",async()=>{
+  const {h,f,moves,writes,saved,home}=await rolloverDuringQueueVerification("lost-write-reply");
+  assert.equal(f.api.state.error,true);assert.deepEqual(f.sends,["Initial continuation"]);
+  assert.equal(moves,1);assert.equal(writes,1);
+  h.tabs.get(17).url=saved;assert.equal((await client(h)).restored[0].text,message.text);
+  h.tabs.get(17).url=home;assert.equal((await client(h)).restored.length,0);
 });

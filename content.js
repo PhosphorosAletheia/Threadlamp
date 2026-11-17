@@ -3157,7 +3157,7 @@ ${LOGIC_START_PROMPT}
     // after the first-send deadline, inspect the current destination once: a
     // delayed browser task must not reject already-visible delivery evidence.
     const deadline = submitted?.verifiedUserId ? Date.now() + SEND_ENABLE_TIMEOUT_MS : submitted?.deadline;
-    const destinationIdentity = chatIdentity();
+    let destinationIdentity = chatIdentity();
     while (state.running && state.runId === runId && owner === runOwnership
       && submitted && owner.submitted === submitted && candidate() && chatIdentity() === destinationIdentity) {
       const user = latestMessageSnapshot("user");
@@ -3167,16 +3167,39 @@ ${LOGIC_START_PROMPT}
         || Date.now() <= submitted.deadline + SEND_ENABLE_TIMEOUT_MS);
       if (matchesSubmission(user) && (!submitted.verifiedUserId || messageId === submitted.verifiedUserId)
         && (beforeDeadline || lateEvidence)) {
-        await queueStore.move({
-          validate: () => controllerLive() && state.running && !state.paused && state.runId === runId
-            && owner === runOwnership && owner.submitted === submitted && candidate() && chatIdentity() === destinationIdentity
-            && matchesSubmission(latestMessageSnapshot("user"))
-            && (!messageId || messageSnapshotId(latestMessageSnapshot("user")) === messageId),
+        const ownsSubmission = () => controllerLive() && state.running && !state.paused && state.runId === runId
+          && owner === runOwnership && owner.submitted === submitted && candidate()
+          && matchesSubmission(latestMessageSnapshot("user"))
+          && (!messageId || messageSnapshotId(latestMessageSnapshot("user")) === messageId);
+        const moveOptions = {
+          validate: () => ownsSubmission() && chatIdentity() === destinationIdentity,
+          retarget: (previous, current) => {
+            // Only the observed first message may follow a temporary URL to its
+            // saved chat. Never follow one saved conversation into another.
+            let temporary = false;
+            try { temporary = /^local-chatgpt:/i.test(decodeURIComponent(new URL(previous).pathname.match(/\/c\/([^/]+)/)?.[1] || "")); }
+            catch { return false; }
+            if (!temporary || !messageId || chatIdentity(previous) !== destinationIdentity
+              || !/\/c\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/?$/i.test(new URL(current).pathname)
+              || current !== window.location.href || !ownsSubmission()) return false;
+            destinationIdentity = chatIdentity(current);
+            recordDiagnostic("queue_move_retry", {reason:"queue_storage",queueOperation:"Q_MOVE",queueFailure:"route",
+              sourceProjectMatches:true,submissionTextMatches:true,priorMessageIdMatches:true});
+            return true;
+          },
           onRetry: (error, retryAttempt) => recordDiagnostic("queue_move_retry", {reason:"queue_storage", queueOperation:"Q_MOVE",
             queueFailure:error.queueFailure, queueProof:error.queueProof, retryAttempt})
-        });
+        };
+        await queueStore.move(moveOptions);
+        // A successful move to a temporary route keeps the tab-scoped queue.
+        // If saving finished while that reply was in flight, use its confirmed
+        // revision for the separate move to the saved chat. Never repeat an
+        // uncertain operation or follow a second saved conversation.
+        if (chatIdentity() !== destinationIdentity && moveOptions.retarget(queueStore.url, window.location.href)) {
+          await queueStore.move(moveOptions);
+        }
         if (!state.running || state.runId !== runId) return;
-        if (owner !== runOwnership || chatIdentity() !== destinationIdentity || !matchesSubmission(latestMessageSnapshot("user"))) {
+        if (!ownsSubmission() || chatIdentity() !== destinationIdentity) {
           throw new Error("The chat changed while saving its queue. Automatic sending stopped.");
         }
         for (const item of queuedPrompts) { if (item.url === owner.url) item.url = window.location.href; }

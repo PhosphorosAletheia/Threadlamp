@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.19.1 beta 1
+
+- Fix queue transfer stopping when ChatGPT changes a temporary conversation URL to its saved URL during handoff verification. Recheck the project, exact submitted prompt and message ID before following that transition.
+- Preserve the source queue and its revision until a confirmed transfer. Retry only explicit verification rejections before storage access; never replay an uncertain write or resend the startup prompt.
+- Keep changed projects, messages, stopped runs and navigation between saved chats blocked. Distinguish route and ownership failures in private diagnostics. Restart the LAN helper to retain the new ownership failure category.
+
 ## 1.19.0 beta 1
 
 - Automatically resume verified active Logic runs after an extension reload without refreshing the chat or resending startup instructions. Preserve counters, follow-up settings, queued messages and WAIT deadlines.

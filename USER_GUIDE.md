@@ -171,6 +171,9 @@ If ChatGPT assigns the new conversation URL late, Logic Mode checks the delivere
 message ID and text before adopting it. A delayed URL alone does not stop the run;
 missing or mismatched message identity still requires inspection. Paragraph and
 line-break formatting is preserved when comparing the delivered continuation.
+If the temporary URL becomes a saved chat while its queue is being transferred,
+Threadlamp verifies the same project, prompt and message ID before continuing.
+It never resends the startup prompt or retries a queue write whose result is unknown.
 
 If an older version stopped after the continuation already ran, save any queued
 or unsent text before updating the extension. Reload the affected saved chat,

@@ -59,20 +59,29 @@ globalThis.ThreadlampQueueStore = class {
       return this.request("Q_SAVE", {items:snapshot});
     });
   }
-  move({validate, onRetry} = {}) {
-    const destination = window.location.href;
+  move({validate, onRetry, retarget} = {}) {
+    let destination = window.location.href;
     return this.enqueue(async () => {
       const previous = this.url;
       if (previous === destination) return;
       this.url = destination;
       for (let attempt = 0; attempt < 3; attempt += 1) {
+        // Before the first request, or after an explicit pre-storage rejection,
+        // the owner may prove that a temporary chat has just acquired its saved
+        // URL. Never reach this branch after a successful or uncertain write.
+        const current = window.location.href;
+        if (!this.closed && current !== destination && retarget?.(destination, current)) {
+          destination = current; this.url = destination;
+        }
         if (this.closed || window.location.href !== destination || validate && !validate()) {
-          throw new Error("The chat or submitted prompt changed while transferring its queue. No further queue transfer was attempted.");
+          throw Object.assign(new Error("The chat or submitted prompt changed while transferring its queue. No further queue transfer was attempted."),
+            {queueOperation:"Q_MOVE", queueFailure:window.location.href !== destination ? "route" : "ownership"});
         }
         try {await this.request("Q_MOVE", {from:previous});return;}
         catch (error) {
           // Refresh browser sender metadata only after an explicit rejection
-          // before storage access. Keep the exact source, destination and revision.
+          // before storage access. Keep the exact source and revision; changing
+          // a temporary destination requires a fresh, explicit ownership proof.
           if (attempt === 2 || !validate || !error.queueRetrySafe || !["route", "document"].includes(error.queueFailure)) throw error;
           if (onRetry) onRetry(error, attempt + 1);
           await new Promise(resolve => setTimeout(resolve, 250));

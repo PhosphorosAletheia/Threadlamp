@@ -53,7 +53,7 @@
     for (const key of numbers) if (Number.isInteger(input[key]) && input[key] >= 0 && input[key] <= 10000000) out[key] = input[key];
     for (const key of booleans) if (typeof input[key] === "boolean") out[key] = input[key];
     if (["Q_LOAD", "Q_SAVE", "Q_MOVE", "Q_HANDOFF"].includes(input.queueOperation)) out.queueOperation = input.queueOperation;
-    if (["sender", "route", "document", "storage"].includes(input.queueFailure)) out.queueFailure = input.queueFailure;
+    if (["sender", "route", "document", "ownership", "storage"].includes(input.queueFailure)) out.queueFailure = input.queueFailure;
     if (["unavailable", "missing", "identity", "frame", "top", "route", "tab"].includes(input.queueProof)) out.queueProof = input.queueProof;
     if (Array.isArray(input.frames)) out.frames = input.frames.slice(0,5)
       .filter(frame => frame && frame.file === "content.js" && Number.isInteger(frame.line) && frame.line > 0 && frame.line <= 100000
