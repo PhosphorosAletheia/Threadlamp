@@ -12,6 +12,9 @@
   // This signal is set only by the extension's isolated-world attach worker.
   const reattached = window.__threadlampReattaching === true;
   delete window.__threadlampReattaching;
+  const reattachReason = window.__threadlampReattachReason;
+  delete window.__threadlampReattachReason;
+  const controllerVersion = chrome.runtime.getManifest().version;
   let disposed = false;
   const runtimeId = chrome.runtime.id;
   const lifecycleTimers = [];
@@ -402,6 +405,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
         state.mode=saved.mode;state.paused=saved.paused;state.error=saved.error;
         state.logicPhase=saved.paused || saved.error ? "update_paused" : "idle";
         state.detail=saved.error ? "Threadlamp reattached. The previous error still needs review."
+          : saved.paused && saved.mode === "setup" ? "Server setup was interrupted by reattachment. Wait for the response to finish, inspect it, then use Recover connection. No prompt was resent."
           : saved.paused ? "Threadlamp reattached. This agent remains paused; review its last response before resuming." : "Threadlamp reattached. This agent remains stopped.";
         terminalNotice=saved.paused || saved.error;updateOverlay();return;
       }
@@ -1620,8 +1624,10 @@ ${LOGIC_START_PROMPT}
   }
 
   function startServerSetup(request) {
-    if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
-    if (serverSetup || state.paused || (state.error && state.logicPhase !== "server_setup_failed") || isGenerating() || composerText(findComposer())
+    const recoverUpdatePause = request.recovering === true && updateRecoveryReady && !state.running
+      && state.mode === "setup" && state.logicPhase === "update_paused" && !state.error;
+    if (!controllerLive() || state.logicPhase === "update_paused" && !recoverUpdatePause) return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat before resuming; use Recover connection to restart interrupted server setup."};
+    if (serverSetup || state.paused && !recoverUpdatePause || (state.error && state.logicPhase !== "server_setup_failed") || isGenerating() || composerText(findComposer())
       || hasMaximumLengthNotice() || !findComposer() || state.logicPhase === "waiting_user"
       || (!request.recovering && parseLogicDirective(latestMessageSnapshot("assistant").text).flag === "user_input")
       || (state.running && state.logicPhase !== "sleeping")
@@ -1630,7 +1636,7 @@ ${LOGIC_START_PROMPT}
       return { accepted: false, detail: "Finish the current response, resolve any pause or error, and clear the draft before starting server setup." };
     }
     const resumeSleeping = state.running && state.logicPhase === "sleeping";
-    state.runId += 1; state.running = true; state.mode = "setup"; state.logicPhase = "server_setup"; state.error = false;
+    state.runId += 1; state.running = true; state.paused = false; state.mode = "setup"; state.logicPhase = "server_setup"; state.error = false;
     serverSetup = { ...request, resumeSleeping, runId: state.runId };
     state.count = 0; state.limit = state.limit || 5; state.message = state.message || "Continue";
     setDetail(request.recovering ? "Recovering this project's existing server connection…" : "Setting up this project's local server connection…");
@@ -4656,7 +4662,7 @@ ${LOGIC_START_PROMPT}
     if (!controllerLive()) return;
     if (request?.type === "AT_PING") {
       if (_sender?.id !== chrome.runtime.id) return;
-      sendResponse({ok:true, version:chrome.runtime.getManifest().version, lifecycle:1}); return;
+      sendResponse({ok:true, version:controllerVersion, lifecycle:1}); return;
     }
     if (["DB_SNAPSHOT", "DB_EXECUTE"].includes(request?.type)) {
       if (_sender?.id !== chrome.runtime.id) { sendResponse({ ok: false, error: "Untrusted dashboard request." }); return; }
@@ -4730,7 +4736,7 @@ ${LOGIC_START_PROMPT}
     marker.id = "threadlamp-controller-lifecycle";
     document.documentElement.append(marker);
   }
-  window.__threadlampController = {dispose:disposeController};
+  window.__threadlampController = {dispose:disposeController, isLive:controllerLive, version:controllerVersion};
   if (reattached) {
     state.mode = "logic"; state.logicPhase = "update_paused"; state.paused = true;
     state.detail = "Threadlamp reattached. Checking the saved run before automatic resume. No prompt was resent; saved queues are preserved.";
@@ -4756,6 +4762,6 @@ ${LOGIC_START_PROMPT}
   window.addEventListener("resize", updateQuickActions, { passive: true });
   window.addEventListener("pagehide", onPageHide);
   updateOverlay();
-  recordDiagnostic("loaded", {pageReload:globalThis.performance?.getEntriesByType?.("navigation")?.[0]?.type === "reload",
+  recordDiagnostic("loaded", {reattachReason, pageReload:globalThis.performance?.getEntriesByType?.("navigation")?.[0]?.type === "reload",
     pageDiscarded:document.wasDiscarded === true});
 })();

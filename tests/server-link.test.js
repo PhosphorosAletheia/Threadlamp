@@ -763,7 +763,33 @@ async function emptyInboxSendGuardsTests() {
   }
 }
 
+async function recoverUpdatePauseTests() {
+  for(const kind of ["recover","initial","verifying","draft","generating","manual-pause","manual-pause-after-update","error","wrong-chat"]) {
+    const f=fixture(["idle","idle"]);f.hide();f.window.location=new URL(sourceUrl);
+    Object.assign(f.api.state,{running:false,paused:true,error:false,mode:"setup",logicPhase:"update_paused"});
+    f.api.setUpdateRecoveryReadyForTest(kind!=="verifying");
+    if(kind==="draft")f.composer.innerText="Keep my draft";
+    if(kind==="generating")f.setSelector("button[data-testid='stop-button']",[f.send]);
+    if(kind==="manual-pause")f.api.state.logicPhase="monitoring";
+    if(kind==="manual-pause-after-update")f.api.state.mode="logic";
+    if(kind==="error")f.api.state.error=true;
+    if(kind==="wrong-chat")f.window.location=new URL(sourceUrl+"-other");
+    const setup={url:sourceUrl,projectId:project,setupId:"recover-update",prompt:"Recover existing server",recovering:kind!=="initial",expiresAt:900000};
+    const requests=[];
+    f.setRequestHandler(async r=>{requests.push(r);return r.type==="SL_STATUS"?{ok:true,connection:{phase:"confirming"}}:{ok:true};});
+    const click=f.send.click;f.send.click=()=>{click();if(f.sends.length===1)f.assistant().textContent=`[[SERVER_READY:${JSON.stringify({protocol:1,setupId:setup.setupId,projectId:project,endpoint})}]]`;};
+    const result=f.api.startServerSetup(setup);
+    assert.equal(result.accepted,kind==="recover",kind);
+    if(kind!=="recover"){assert.equal(f.sends.length,0,kind);continue;}
+    for(let i=0;i<250&&f.api.getServerSetupForTest();i++)await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(f.api.getServerSetupForTest(),null);assert.equal(f.api.state.error,false,f.api.state.detail);
+    assert.equal(f.api.state.paused,false);assert.equal(f.sends.length,2);
+    assert.ok(requests.some(r=>r.type==="SL_COMPLETE"));
+  }
+}
+
 async function main() {
+  await recoverUpdatePauseTests();
   await emptyInboxSendGuardsTests();
   await protocolTests(); await routingTests(); await failureTests(); await reconnectTests();
   await setupLeaseTests(); await recoveryTests(); await recoveryAfterRestartTests();

@@ -121,6 +121,9 @@ test("queue failures retain only allowlisted operation and verification categori
   const retry=schema.snapshot({event:"queue_move_retry",retryAttempt:1,queueProof:"unavailable"});
   assert.equal(retry.event,"queue_move_retry");assert.equal(retry.queueProof,"unavailable");
   assert.equal(schema.snapshot({event:"queue_error",queueOperation:"Q_MOVE",queueFailure:"ownership"}).queueFailure,"ownership");
+  for(const reattachReason of ["ping_timeout","ping_failed","invalid_reply","version_changed"])
+    assert.equal(schema.snapshot({event:"loaded",reattachReason}).reattachReason,reattachReason);
+  assert.equal(schema.snapshot({event:"loaded",reattachReason:"PRIVATE"}).reattachReason,undefined);
   const rejected=schema.snapshot({event:"queue_error",queueOperation:"PRIVATE_URL",queueFailure:"PRIVATE_DRAFT",queueProof:"PRIVATE_ERROR"});
   assert.equal(JSON.stringify(rejected).includes("PRIVATE"),false);
 });

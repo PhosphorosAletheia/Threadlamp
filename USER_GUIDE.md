@@ -293,6 +293,13 @@ be confirmed leaves the agent paused for review. Inspect the chat, then use
 do not resend the startup prompt. Automatic update recovery applies to Logic
 Mode in the same loaded page, not browser restarts, page refreshes or Loop mode.
 
+If an extension reload interrupts local-server setup or recovery, wait for the
+agent's response to finish and inspect it, then choose **Recover connection**.
+This restarts recovery of the existing integration without first starting Logic
+Mode. A draft, active response, unresolved error or ordinary manual pause still
+blocks recovery. Healthy controllers stay attached if a status-check reply is
+lost or delayed.
+
 **First upgrade to 1.19.0:** earlier versions did not save update checkpoints.
 Reload the extension and resume the agents once. Subsequent extension reloads
 can recover their verified runs automatically. Restart the LAN helper to retain

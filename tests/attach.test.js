@@ -66,7 +66,7 @@ test("document preparation refuses real legacy controls and disposes lifecycle-a
         assert.equal(event.type,"threadlamp:detach");disposals++;oldUI=false;context.window.__chatGptContinueLoopLoaded=false;
       }};
       context.chrome.scripting={executeScript:async args=>{
-        if (args.func) return [{documentId:"fixture-document",result:args.func()}];
+        if (args.func) return [{documentId:"fixture-document",result:args.func(...(args.args || []))}];
         h.setPageHandler(async()=>({ok:true,lifecycle:1,version:"1.15.0"}));return [];
       }};
     }});
@@ -74,5 +74,26 @@ test("document preparation refuses real legacy controls and disposes lifecycle-a
     assert.equal(result.ok,!legacy);
     assert.equal(disposals,legacy ? 0 : 1);
     assert.equal(h.context.window.__threadlampReattaching,legacy ? undefined : true);
+  }
+});
+
+test("a lost or timed-out ping cannot replace a live controller in the inspected document",async()=> {
+  for(const timedOut of [false,true]) {
+    const page=contentHarness();
+    Object.assign(page.api.state,{running:true,mode:"setup",logicPhase:"server_setup",runId:7});
+    let injected=0;
+    const h=await harness({}, {pageHandler:async()=>{throw Object.assign(Error("Transient ping failure"),{attachTimeout:timedOut});},
+      configureContext:context=>{
+        context.window=page.window;
+        context.document={getElementById:()=>{throw Error("A healthy controller must not be detached");}};
+        context.chrome.scripting={executeScript:async args=>{
+          if(args.files){injected++;throw Error("Must not inject");}
+          return [{frameId:0,documentId:"same-document",result:args.func(...args.args)}];
+        }};
+      }});
+    const result=await h.dispatch({type:"AT_ATTACH",tabId:17});
+    assert.equal(result.ok,true);assert.equal(result.attached,false);assert.equal(injected,0);
+    assert.equal(page.api.state.running,true);assert.equal(page.api.state.runId,7);
+    assert.equal(page.api.state.mode,"setup");
   }
 });

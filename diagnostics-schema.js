@@ -53,6 +53,7 @@
     for (const key of numbers) if (Number.isInteger(input[key]) && input[key] >= 0 && input[key] <= 10000000) out[key] = input[key];
     for (const key of booleans) if (typeof input[key] === "boolean") out[key] = input[key];
     if (["Q_LOAD", "Q_SAVE", "Q_MOVE", "Q_HANDOFF"].includes(input.queueOperation)) out.queueOperation = input.queueOperation;
+    if (["invalid_reply", "version_changed", "ping_timeout", "ping_failed"].includes(input.reattachReason)) out.reattachReason = input.reattachReason;
     if (["sender", "route", "document", "ownership", "storage"].includes(input.queueFailure)) out.queueFailure = input.queueFailure;
     if (["unavailable", "missing", "identity", "frame", "top", "route", "tab"].includes(input.queueProof)) out.queueProof = input.queueProof;
     if (Array.isArray(input.frames)) out.frames = input.frames.slice(0,5)

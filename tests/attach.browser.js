@@ -46,6 +46,16 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
     const {sessionId:settingsPage}=await call("Target.attachToTarget",{targetId:settingsTarget,flatten:true});
     const schedule=await waitFor(()=>evaluate(settingsPage,`chrome.runtime.sendMessage({type:"HB_SAVE",tabId:${tabId},configuration:{kind:"interval",intervalMinutes:60,timeZone:"UTC",prompt:"Invented scheduled check",message:"Continue",limit:25,rolloverEnabled:true}})`),"save fixture heartbeat");
     assert.equal(schedule.ok,true,JSON.stringify(schedule));
+    // A failed message ping must not destroy a healthy controller. Execute the
+    // fallback probe in the real isolated world, including its live run state.
+    const beforeProbe=await send({type:"DB_SNAPSHOT"});
+    await evaluate(w.sessionId,`globalThis.originalFixtureSend=chrome.tabs.sendMessage;chrome.tabs.sendMessage=(...args)=>args[1]?.type==='AT_PING'?Promise.reject(new Error('Fixture lost ping')):globalThis.originalFixtureSend.apply(chrome.tabs,args);true`);
+    try {
+      const attached=await evaluate(settingsPage,`chrome.runtime.sendMessage({type:'AT_ATTACH',tabId:${tabId}})`);
+      assert.equal(attached.ok,true,JSON.stringify(attached));assert.equal(attached.attached,false);
+    } finally {await evaluate(w.sessionId,`chrome.tabs.sendMessage=globalThis.originalFixtureSend;delete globalThis.originalFixtureSend;true`);}
+    const afterProbe=await send({type:"DB_SNAPSHOT"});
+    assert.equal(afterProbe.instanceId,beforeProbe.instanceId);assert.equal(afterProbe.running,true);
     await call("Target.closeTarget",{targetId:settingsTarget});
     const snapshot=await send({type:"DB_SNAPSHOT"});
     const queued=await send({type:"DB_EXECUTE",commandId:"fixture-queue",action:"queue_append",target:{instanceId:snapshot.instanceId,url:snapshot.url,revision:snapshot.revision},payload:{text:"Invented queued instruction"}});
@@ -91,6 +101,6 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
     // A forged page event may stop automation, but cannot start it or send.
     await evaluate(page,'document.dispatchEvent(new Event("threadlamp:detach"))');
     await sleep(300);assert.equal(await evaluate(page,"window.fixtureSends"),0);
-    console.log("PASS: five real extension reloads; safe draft fallback, two automatic resumes, preserved manual pause, unchanged page and queue, no duplicate sends.");
+    console.log("PASS: lost ping preserves live controller; five real extension reloads; safe draft fallback, two automatic resumes, preserved manual pause, unchanged page and queue, no duplicate sends.");
   }finally{cdp?.close();browser?.kill("SIGTERM");}
 })().catch(error=>{console.error(error);process.exitCode=1;});

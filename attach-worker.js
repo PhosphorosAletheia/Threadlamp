@@ -9,7 +9,11 @@
     try { const url = new URL(value); return url.protocol === "https:" && ["chatgpt.com", "chat.openai.com"].includes(url.hostname); }
     catch { return false; }
   };
-  function prepareDocument() {
+  function prepareDocument(expectedVersion, reason) {
+    // A slow/lost message reply is not proof that a live controller needs
+    // replacement. Probe in this document's isolated world before cancelling it.
+    const controller = window.__threadlampController;
+    if (controller?.version === expectedVersion && controller.isLive?.()) return {healthy:true};
     const marker = document.getElementById("threadlamp-controller-lifecycle");
     const oldUI = document.getElementById("chatgpt-continue-loop-status") || document.getElementById("chatgpt-continue-loop-quick-actions");
     if (!marker && (oldUI || window.__chatGptContinueLoopLoaded)) return {legacy:true};
@@ -19,23 +23,28 @@
     window.__threadlampController?.dispose();
     if (document.getElementById("chatgpt-continue-loop-status") || document.getElementById("chatgpt-continue-loop-quick-actions")) return {legacy:true};
     window.__threadlampReattaching = true;
+    window.__threadlampReattachReason = reason;
     return {ready:true};
   }
   async function ping(tabId, documentId) {
     let timer;
     try {
       return await Promise.race([chrome.tabs.sendMessage(tabId, {type:"AT_PING"}, documentId ? {documentId} : {frameId:0}),
-        new Promise((_, reject) => {timer = setTimeout(() => reject(new Error("Attach check timed out.")), 2000);})]);
+        new Promise((_, reject) => {timer = setTimeout(() => reject(Object.assign(new Error("Attach check timed out."), {attachTimeout:true})), 2000);})]);
     } finally {clearTimeout(timer);}
   }
   async function attach(tabId) {
     const tab = await chrome.tabs.get(tabId);
     if (!supported(tab.url) || tab.discarded || tab.status === "loading") throw new Error("This chat is loading or unavailable. Wait for it to finish loading.");
+    const version = chrome.runtime.getManifest().version;
+    let reason = "invalid_reply";
     try {
       const result = await ping(tabId);
-      if (result?.ok && result.lifecycle === 1 && result.version === chrome.runtime.getManifest().version) return {ok:true, attached:false};
-    } catch { /* The old extension context may no longer have a receiver. */ }
-    const [inspection] = await chrome.scripting.executeScript({target:{tabId, frameIds:[0]}, func:prepareDocument});
+      if (result?.ok && result.lifecycle === 1 && result.version === version) return {ok:true, attached:false};
+      if (result?.ok && result.version !== version) reason = "version_changed";
+    } catch (error) { reason = error.attachTimeout ? "ping_timeout" : "ping_failed"; }
+    const [inspection] = await chrome.scripting.executeScript({target:{tabId, frameIds:[0]}, func:prepareDocument, args:[version, reason]});
+    if (inspection?.result?.healthy) return {ok:true, attached:false};
     if (inspection?.result?.legacy) throw new Error("This tab uses an older Threadlamp controller. Refresh this chat once when safe; future extension reloads can reconnect without a page refresh.");
     if (!inspection?.result?.ready || !inspection.documentId) throw new Error("The chat document could not be verified. Try again when it has finished loading.");
     const current = await chrome.tabs.get(tabId);

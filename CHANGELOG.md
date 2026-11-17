@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.19.2 beta 1
+
+- Verify controller liveness inside the chat before replacing it after a failed or slow extension health-check reply. A healthy controller keeps its active Logic run or server recovery monitor.
+- Allow an explicit Recover connection request from a completed update pause, without first starting Logic Mode. Keep drafts, active responses, manual pauses, errors and changed destinations blocked.
+- Explain how to recover server setup interrupted by a genuine extension reload. Record a bounded reattachment-reason category in private diagnostics; restart the LAN helper to retain this field.
+
 ## 1.19.1 beta 1
 
 - Fix queue transfer stopping when ChatGPT changes a temporary conversation URL to its saved URL during handoff verification. Recheck the project, exact submitted prompt and message ID before following that transition.
