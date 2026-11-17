@@ -29,6 +29,7 @@ const test=`(async function(window) {
   const sleep=async()=>{clock+=9000}, state={running:true,runId:1}, queuedPrompts=[];
   let queueMoves=0; const queueStore={move:async()=>{queueMoves++}};
   const recordDiagnostic=()=>{};
+  const requireController=()=>{};
   let runOwnership=null;
   const wrapper=document.createElement('div');wrapper.setAttribute('data-chatgpt-search-message-ids','01234567-89ab-4cde-8f01-23456789abcd');
   const user=document.createElement('div');user.setAttribute('data-user-message-bubble','true');wrapper.append(user);document.body.append(wrapper);
@@ -44,8 +45,18 @@ const test=`(async function(window) {
   check(rolloverRenderedText(user.textContent)!==rolloverRenderedText(expected),'fixture must reproduce joined raw text');
   check(rolloverRenderedText(messageText(user))===rolloverRenderedText(expected),'reader must preserve paragraph and BR separators');
   check(user.innerHTML===original,'reading must not mutate the live message');
+  function collapse() {
+    const body=user.firstElementChild;
+    const ellipsis=document.createElement('span');ellipsis.className='block';ellipsis.setAttribute('aria-hidden','true');ellipsis.textContent='…';body.append(ellipsis);
+    const toggle=document.createElement('button');toggle.setAttribute('aria-expanded','false');toggle.setAttribute('data-thread-find-skip','');toggle.setAttribute('data-markdown-copy','');toggle.textContent='Show more';user.append(toggle);
+    return {body,ellipsis,toggle};
+  }
+  collapse();
+  const collapsedHtml=user.innerHTML;
+  check(rolloverRenderedText(messageText(user))===rolloverRenderedText(expected),'collapsed user bubble must exclude display ellipsis');
+  check(user.innerHTML===collapsedHtml,'collapsed message read must not expand or edit live DOM');
   for(const scenario of ['match','expired-visible','wrong-text','wrong-id','wrong-project','removed-space']) {
-    render(expected);wrapper.setAttribute('data-chatgpt-search-message-ids','01234567-89ab-4cde-8f01-23456789abcd');
+    render(expected);collapse();wrapper.setAttribute('data-chatgpt-search-message-ids','01234567-89ab-4cde-8f01-23456789abcd');
     window.location=new URL(home);
     runOwnership={runId:1,identity:chatIdentity(),url:home,submitted:{text:expected,before:{element:null,text:''},deadline:clock-1}};
     if(scenario!=='expired-visible') {
@@ -60,11 +71,24 @@ const test=`(async function(window) {
     check(accepted===(scenario==='match'||scenario==='expired-visible'),'saved URL adoption: '+scenario);
   }
   check(queueMoves===2,'only verified saved destinations move their queue');
+  for(const scenario of ['typed-ellipsis','hidden-prose','missing-toggle','missing-toggle-marker','inline-ellipsis','nonterminal-ellipsis','assistant']) {
+    render(expected);const {body,ellipsis,toggle}=collapse();
+    if(scenario==='typed-ellipsis')ellipsis.removeAttribute('aria-hidden');
+    if(scenario==='hidden-prose')ellipsis.textContent='additional instruction';
+    if(scenario==='missing-toggle')toggle.remove();
+    if(scenario==='missing-toggle-marker')toggle.removeAttribute('data-markdown-copy');
+    if(scenario==='inline-ellipsis')ellipsis.className='';
+    if(scenario==='nonterminal-ellipsis'){const p=document.createElement('p');p.textContent='additional instruction';body.append(p)}
+    if(scenario==='assistant'){user.removeAttribute('data-user-message-bubble');user.setAttribute('data-message-author-role','assistant')}
+    check(messageText(user).includes(ellipsis.textContent),'preserve non-control content: '+scenario);
+    check(rolloverRenderedText(messageText(user))!==rolloverRenderedText(expected),'different text remains significant: '+scenario);
+    user.removeAttribute('data-message-author-role');user.setAttribute('data-user-message-bubble','true');
+  }
   user.innerHTML='<p>un<span>broken</span> inline</p><p>Keep\\tthis\\u00a0space\\u200b.</p><button>Copy</button>';
   check(rolloverRenderedText(messageText(user))==='unbroken inline Keep\\tthis\\u00a0space\\u200b.','inline text, tabs, Unicode and UI stripping');
   user.style.display='none';
   check(rolloverRenderedText(messageText(user))==='unbroken inline Keep\\tthis\\u00a0space\\u200b.','detached or hidden rendering does not remove separators');
-  document.getElementById('result').textContent='PASS: real paragraph/BR reader, immutable DOM, delayed URL adoption, wrong text/ID/project guards, inline boundaries and significant whitespace';
+  document.getElementById('result').textContent='PASS: collapsed user display controls, genuine suffix preservation, immutable DOM, delayed URL adoption, wrong text/ID/project guards and significant whitespace';
 })({location:new URL(${JSON.stringify(home)}),getComputedStyle:window.getComputedStyle.bind(window)}).catch(error=>{document.getElementById('result').textContent='FAIL: '+error.message});`;
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),"threadlamp-handoff-reader-"));
 try {

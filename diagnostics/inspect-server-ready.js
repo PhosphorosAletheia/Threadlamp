@@ -85,6 +85,21 @@
     return cleaned;
   }
 
+  function removeCollapsedUserMessageEllipsis(root) {
+    // ChatGPT places a display-only ellipsis after the complete text of a
+    // collapsed user bubble. Require the observed disclosure-control structure;
+    // typed ellipses and unrelated aria-hidden text remain message content.
+    for (const marker of root.querySelectorAll("span.block[aria-hidden='true']")) {
+      const body = marker.parentElement;
+      const toggle = body?.nextElementSibling;
+      if (marker.children.length === 0 && marker.textContent.trim() === "…"
+        && body?.tagName === "DIV" && body.lastElementChild === marker
+        && toggle?.matches("button[aria-expanded][data-thread-find-skip][data-markdown-copy]")) {
+        marker.remove();
+      }
+    }
+  }
+
   function messageText(element) {
     if (!element) return "";
 
@@ -122,9 +137,11 @@
         // When reading its role container, remove action controls from a clone
         // so Copy/feedback labels cannot appear after the final Logic marker.
         const clone = root.cloneNode(true);
+        const isUser = element.matches?.("[data-message-author-role='user'], [data-user-message-bubble='true'], [data-turn='user'], [data-role='user'], [data-testid='user-turn']");
+        if (isUser) removeCollapsedUserMessageEllipsis(clone);
         verifiedResourceRows(clone).forEach((row) => row.remove());
         clone.querySelectorAll(MESSAGE_UI_SELECTOR).forEach((node) => node.remove());
-        if (element.matches?.("[data-message-author-role='user'], [data-user-message-bubble='true'], [data-turn='user'], [data-role='user'], [data-testid='user-turn']")) {
+        if (isUser) {
           // textContent joins paragraphs and drops BRs in newer user bubbles.
           // Restore structural breaks on the detached clone, without changing
           // inline word boundaries or relaxing submitted-message comparisons.

@@ -148,6 +148,8 @@ stops with a notice instead of guessing. Existing conversations are never used
 as automatic handoff destinations. The continuation includes the source project
 ID and chat link; the agent must request missing context if it cannot access it.
 
+ChatGPT may collapse a long submitted prompt behind “Show more.” Threadlamp excludes that control’s display ellipsis when verifying the handoff; you do not need to expand the message.
+
 An automatic handoff controls the new destination message box. After verifying
 the handoff record and destination project, Threadlamp clears any text restored
 there, including another agent's handoff or queued instructions. It builds a fresh

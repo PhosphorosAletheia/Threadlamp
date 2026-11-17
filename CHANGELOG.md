@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.18.1 beta 1
+
+- Fix new-chat handoffs stopping when ChatGPT collapses the submitted prompt behind “Show more.” Exclude its verified display ellipsis from user-message reads without expanding the message or changing its contents.
+- Keep genuine ellipses, additional instructions, and project/conversation ownership checks intact.
+
 ## 1.18.0 beta 1
 
 - Add `npm run repair:check` for manually triggered repair reviews. Collect a private, sanitized diagnostic snapshot; compare source and runtime versions; group failures without duplicate counts; and flag stale or incomplete evidence.
