@@ -40,6 +40,17 @@ test("paired LAN worker revokes stale sockets and preserves dashboard identity c
   assert.equal(socket.sent.at(-1).response.ok,true);
   assert.equal(socket.sent.at(-1).response.report.schema,1);
   assert.equal(executed,1,"diagnostic export does not invoke chat controls");
+  const permissions=[];
+  h.context.chrome.permissions.contains=async p=>{permissions.push(Array.from(p.origins));return true;};
+  await socket.receive({type:"request",id:"host-permission",request:{type:"LAN_LOOPBACK_PERMISSION",host:"192.168.50.25"}});
+  assert.equal(socket.sent.at(-1).response.granted,true);
+  assert.deepEqual(permissions.at(-1),["https://192.168.50.25/*"]);
+  const forwarded=[];
+  h.context.ServerLinkWorker.dashboard=async r=>{forwarded.push(r);return {ok:true,connection:null};};
+  await socket.receive({type:"request",id:"forget",request:{type:"DB_COMMAND",action:"server_forget",commandId:"forget-once",target:request.target,payload:{confirmed:true,setupId:"test-setup",pending:0}}});
+  assert.equal(socket.sent.at(-1).response.ok,true);
+  assert.equal(forwarded[0].type,"SL_CONTROL");assert.equal(forwarded[0].action,"forget");
+  assert.equal(forwarded[0].confirmed,true);assert.equal(forwarded[0].setupId,"test-setup");assert.equal(forwarded[0].pending,0);
   // Hold initialization so a request cannot enter the command router before disabling.
   vm.runInContext("globalThis.previousInitialization = initializationPromise; initializationPromise = new Promise(resolve => globalThis.releaseInitialization = resolve)",h.context);
   request.commandId="lan-command-3";

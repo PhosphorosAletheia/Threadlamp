@@ -24,8 +24,8 @@
   const nonce = () => crypto.randomUUID();
   const sameChat = (a, b) => Boolean(ServerLink.chatKey(a) && ServerLink.chatKey(a) === ServerLink.chatKey(b));
   const summary = r => r ? {
-    projectId: r.projectId, url: r.url, endpoint: r.endpoint || "", enabled: r.enabled,
-    phase: r.phase,
+    projectId: r.projectId, url: r.url, host: ServerLink.savedHost(r), endpoint: r.endpoint || "", enabled: r.enabled,
+    phase: r.phase, setupId: r.setupId,
     detail: r.pendingDestination && r.phase !== "blocked" ? "Waiting for the continuation prompt in the verified new chat." : r.detail,
     pending: r.events.length,
     uncertain: r.events.filter(e => e.phase === "uncertain").map(e => e.eventId)
@@ -95,7 +95,7 @@
       || ["blocked", "disabled", "setup", "confirming"].includes(record.phase)) return;
     const pairing = !record.credential;
     if (pairing && Date.now() > record.expiresAt) return;
-    const ws = new WebSocket(ServerLink.endpoint(record.endpoint));
+    const ws = new WebSocket(ServerLink.approvedEndpoint(record, record.endpoint));
     const s = { ws, stage: "opening", challenge: nonce(), lastSeen: Date.now(), deadline: Date.now() + 20000 };
     sockets.set(record.projectId, s);
     const transmit = data => ws.send(JSON.stringify(data));
@@ -212,6 +212,9 @@
       // Even an old popup sending SL_SETUP must recover an existing attempt.
       const previous = r;
       const recovering = request.type === "SL_RECOVER" || Boolean(previous);
+      const host = previous ? ServerLink.savedHost(previous) : ServerLink.host(request.host);
+      if (previous && request.host !== undefined && ServerLink.host(request.host) !== host) throw new Error("Forget this connection before selecting a different host.");
+      if (!await chrome.permissions.contains({origins: ServerLink.origins(host)})) throw new Error("Server host permission is missing. Open the extension popup on this computer and allow the selected host during setup.");
       if (r?.enabled && !r.setupComplete && !["blocked", "disabled"].includes(r.phase)
         && await liveSetup(r)) throw new Error("Setup is already in progress. Stop or disable it before retrying.");
       if (r && !sameChat(r.url, tab.url)) throw new Error("This project is assigned to another conversation. Use Assign this chat first.");
@@ -227,7 +230,7 @@
       const current = await chrome.tabs.get(tab.id);
       if (Heartbeat.canonicalUrl(current.url) !== Heartbeat.canonicalUrl(tab.url)) throw new Error("The chat changed.");
       close(project);
-      r = records[project] = { projectId: project, url: Heartbeat.canonicalUrl(tab.url), tabId: tab.id,
+      r = records[project] = { projectId: project, host, url: Heartbeat.canonicalUrl(tab.url), tabId: tab.id,
         instanceId: identity.instanceId, setupId: nonce(), pairingToken: nonce() + nonce(),
         ...(previous?.endpoint ? { endpoint: previous.endpoint } : {}),
         ...(previous?.credential ? { credential: previous.credential } : {}),
@@ -260,6 +263,20 @@
     if (!r) return { ok: true, connection: null, event: null };
     if (popup) {
       if (request.type !== "SL_CONTROL") throw new Error("Unsupported connection control.");
+      if (request.action === "forget") {
+        if (request.confirmed !== true) throw new Error("Confirm Forget connection before removing saved pairing and inbox state.");
+        if (request.setupId !== r.setupId || request.pending !== r.events.length) throw new Error("The connection or pending inbox changed. Review it before forgetting.");
+        if (r.events.some(e => e.phase !== "queued")) throw new Error("Resolve in-progress or uncertain event delivery before forgetting this connection.");
+        close(project);
+        // Delete durably before cancelling the monitor. Late replies and socket
+        // callbacks must not restore pairing, acknowledge events, or reconnect.
+        delete records[project];
+        await save(records); await alarm(records);
+        if (!r.setupComplete) {
+          try { await send(r.tabId, {type: "SERVER_LINK_CANCEL", setupId: r.setupId}); } catch { /* Deleted attempts cannot pair. */ }
+        }
+        return {ok: true, connection: null};
+      }
       if (request.action === "assign") {
         if (r.events.some(e => e.phase !== "queued") || ["setup", "pairing", "confirming"].includes(r.phase)) throw new Error("Finish setup or resolve uncertain delivery before moving the connection.");
         r.url = Heartbeat.canonicalUrl(tab.url); r.tabId = tab.id; r.instanceId = null; r.pendingDestination = null;
@@ -323,7 +340,7 @@
       return { ok: true };
     } else if (request.type === "SL_READY") {
       if (!r.enabled || r.phase !== "setup" || request.setupId !== r.setupId || Date.now() > r.expiresAt) throw new Error("Setup expired or was cancelled.");
-      const endpoint = ServerLink.endpoint(request.endpoint);
+      const endpoint = ServerLink.approvedEndpoint(r, request.endpoint);
       if (r.endpoint && r.endpoint !== endpoint) throw new Error("Recovery returned a different server address. Keep the existing server and fixed port; inspect the chat before retrying.");
       r.endpoint = endpoint; r.phase = "pairing"; r.detail = "Verifying the local server…";
       await save(records); connect(r);

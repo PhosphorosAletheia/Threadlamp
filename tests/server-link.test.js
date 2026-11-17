@@ -38,6 +38,7 @@ async function worker(saved = {}) {
       active: true, instanceId: instance, url: h.tabs.get(id).url,
       setupId: setups.findLast(s => s.url === h.tabs.get(id).url)?.setupId
     };
+    if (request.type === "SERVER_LINK_CANCEL") return {accepted: true};
     if (request.type === "SERVER_LINK_WAKE") return { accepted: false };
     throw new Error("Unexpected page request: " + request.type);
   });
@@ -46,7 +47,7 @@ async function worker(saved = {}) {
   const chat = (type, data = {}, tabId = 17) => h.dispatch({ type, instanceId: instance, ...data },
     { id: "test-extension", frameId: 0, tab: h.tabs.get(tabId) });
   async function setup(tabId = 17, address = endpoint, complete = true, action = "SL_SETUP") {
-    const created = await h.dispatch({ type: action, tabId });
+    const created = await h.dispatch({ type: action, tabId, host: new URL(address).hostname });
     assert.equal(created.ok, true, created.error);
     const p = h.context.ServerLink.projectId(h.tabs.get(tabId).url);
     assert.ok(setups.at(-1).prompt.includes(record(p).pairingToken));
@@ -840,7 +841,84 @@ async function setupButtonTests() {
   }
 }
 
+async function lanAndForgetTests() {
+  const h = await worker(), api = h.context.ServerLink;
+  const lanHost = "192.168.50.25", lanEndpoint = `wss://${lanHost}:8443${api.PATH}`;
+  for (const host of ["10.0.0.2", "172.16.0.2", "172.31.255.254", lanHost]) {
+    assert.equal(api.host(host), host);
+    assert.equal(api.endpoint(`wss://${host}:8443${api.PATH}`), `wss://${host}:8443${api.PATH}`);
+    assert.deepEqual(Array.from(api.origins(host)), [`https://${host}/*`]);
+  }
+  for (const host of ["172.15.0.2", "172.32.0.2", "8.8.8.8", "0.0.0.0", "169.254.1.2", "[::1]", "server.local", "192.168.1.256", "192.168.01.2", "192.168.1.2/path", "https://192.168.1.2", "192.168.1.2:8443", {}]) {
+    assert.throws(() => api.host(host), /Enter localhost/);
+  }
+  for (const value of [lanEndpoint.replace("wss:", "ws:"), lanEndpoint.replace(":8443", ":443"), lanEndpoint + "?token=test", lanEndpoint.replace(lanHost, "8.8.8.8")]) assert.throws(() => api.endpoint(value), /Use ws/);
+  assert.equal(api.approvedEndpoint({}, endpoint.replace("localhost", "127.0.0.1")), endpoint.replace("localhost", "127.0.0.1"));
+  assert.throws(() => api.approvedEndpoint({}, lanEndpoint), /different host/);
+  h.context.chrome.permissions.contains = async permission => {
+    assert.deepEqual(Array.from(permission.origins), [`https://${lanHost}/*`]);
+    return false;
+  };
+  let result = await h.dispatch({type:"SL_SETUP",tabId:17,host:lanHost});
+  assert.equal(result.ok, false); assert.match(result.error, /permission/);
+  assert.equal(h.record(), undefined); assert.equal(h.setups.length, 0);
+  h.context.chrome.permissions.contains = async () => true;
+  const socket = await h.setup(17, lanEndpoint);
+  assert.equal(socket.url, lanEndpoint);
+  assert.equal(h.record().host, lanHost);
+  assert.match(h.setups[0].prompt, /Selected server host: 192.168.50.25/);
+  assert.match(h.setups[0].prompt, /certificate trusted by Chrome/);
+  assert.ok(!h.setups[0].prompt.includes("Bind to loopback only"));
+  assert.equal((await h.get()).connection.host, lanHost);
+  result = await h.dispatch({type:"SL_RECOVER",tabId:17,host:"10.0.0.2"});
+  assert.equal(result.ok, false); assert.match(result.error, /Forget/);
+  assert.equal(h.record().credential, credential);
+  const forget = extra => h.dispatch({type:"SL_CONTROL",tabId:17,action:"forget",confirmed:true,
+    setupId:h.record()?.setupId,pending:h.record()?.events.length,...extra});
+  assert.equal((await forget({confirmed:false})).ok, false);
+  assert.equal((await forget({setupId:"stale-attempt"})).ok, false);
+  socket.receive(event()); await h.get();
+  assert.equal((await forget({pending:0})).ok, false, "a changed inbox needs renewed confirmation");
+  const claim = await h.chat("SL_TAKE"); assert.ok(claim.event);
+  assert.equal((await forget()).ok, false, "cannot forget a dispatch in progress");
+  await h.chat("SL_RESULT", {attemptId:claim.attemptId,outcome:"uncertain"});
+  assert.equal((await forget()).ok, false, "cannot erase evidence of an uncertain delivery");
+  await h.dispatch({type:"SL_CONTROL",tabId:17,action:"resolve",eventId:event().eventId,resolution:"retry"});
+  const oldId = h.record().setupId;
+  result = await forget(); assert.equal(result.ok, true); assert.equal(result.connection, null);
+  assert.equal(h.record(), undefined); assert.equal(socket.readyState, 3);
+  assert.equal(h.alarms.has("logic-server-links"), false);
+  const sent = socket.sent.length;
+  socket.receive(event(2)); await h.get();
+  assert.equal(socket.sent.length, sent, "late events cannot be acknowledged after Forget");
+  await h.chat("SL_READY", {setupId:oldId,endpoint:lanEndpoint});
+  assert.equal(h.record(), undefined, "late setup replies cannot restore a deleted record");
+  result = await h.dispatch({type:"SL_SETUP",tabId:17,host:"localhost"});
+  assert.equal(result.ok, true, result.error);
+  assert.notEqual(h.record().setupId, oldId); assert.ok(h.record().pairingToken);
+  assert.equal(h.record().credential, undefined); assert.equal(h.record().endpoint, undefined);
+  assert.equal(h.record().events.length, 0); assert.equal(h.record().seen.length, 0);
+  assert.equal(h.setups.at(-1).recovering, false, "Forget enables initial setup, not recovery");
+  assert.match(h.setups.at(-1).prompt, /explicitly requested new setup replaces/);
+  result = await h.chat("SL_READY", {setupId:h.record().setupId,endpoint:lanEndpoint});
+  assert.equal(result.ok, false); assert.match(result.error, /different host/);
+  const freshId = h.record().setupId;
+  result = await forget(); assert.equal(result.ok, true);
+  assert.ok(h.messages.some(m => m.request.type === "SERVER_LINK_CANCEL" && m.request.setupId === freshId));
+  assert.equal((await h.chat("SL_FAIL",{setupId:freshId})).connection, null);
+
+  // A new LAN attempt must reject a valid endpoint on a different LAN host.
+  await h.dispatch({type:"SL_SETUP",tabId:17,host:lanHost});
+  result = await h.chat("SL_READY",{setupId:h.record().setupId,endpoint:lanEndpoint.replace(lanHost,"192.168.50.26")});
+  assert.equal(result.ok,false); assert.match(result.error,/different host/);
+  await h.chat("SL_FAIL",{setupId:h.record().setupId});
+  result = await h.dispatch({type:"SL_RECOVER",tabId:17});
+  assert.equal(result.ok,true); assert.equal(h.record().host,lanHost);
+  assert.ok(h.setups.at(-1).prompt.includes(`Selected server host: ${lanHost}`));
+}
+
 async function main() {
+  await lanAndForgetTests();
   await setupButtonTests();
   await recoverUpdatePauseTests();
   await emptyInboxSendGuardsTests();

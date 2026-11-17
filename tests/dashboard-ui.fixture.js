@@ -11,7 +11,7 @@ const output = process.argv[2];
 if (!output || !path.isAbsolute(output)) throw new Error("Pass an absolute temporary output directory.");
 fs.mkdirSync(output, { recursive: true });
 const root = path.resolve(__dirname, "..");
-for (const file of ["dashboard.css", "brand.css", "dashboard.js", "heartbeat.js"]) fs.copyFileSync(path.join(root, file), path.join(output, file));
+for (const file of ["dashboard.css", "brand.css", "dashboard.js", "heartbeat.js", "server-link.js"]) fs.copyFileSync(path.join(root, file), path.join(output, file));
 function mock() {
   const actions = [];
   let uncertainBroadcast = false, onQueueRequest = null, rewriteResolver = null;

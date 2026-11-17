@@ -88,13 +88,17 @@ SPDX-License-Identifier: MPL-2.0 -->
 
       <section class="heartbeat-settings">
         <details>
-          <summary>Local server connection for this project</summary>
+          <summary>Server connection for this project</summary>
           <p>Use Recover connection if the agent already set up its server, even if this extension has no saved record. It reuses the existing server, fixed port, and completed work. Finish the current response first.</p>
+          <label for="sl-host">Server host (localhost or LAN IP)</label>
+          <input id="sl-host" type="text" value="localhost" placeholder="192.168.1.50" autocomplete="off" spellcheck="false">
+          <p class="hint">LAN servers require trusted TLS (wss). Forget a saved connection to change its host.</p>
           <p id="sl-status" aria-live="polite">Open a saved project chat.</p>
           <div class="actions logic-actions">
             <button id="sl-setup" class="logic-primary" type="button">Set up connection</button>
             <button id="sl-recover" class="logic-secondary" type="button">Recover connection</button>
             <button id="sl-toggle" class="logic-secondary" type="button" disabled>Disable</button>
+            <button id="sl-forget" class="logic-secondary" type="button" disabled>Forget connection</button>
             <button id="sl-assign" class="logic-secondary" type="button" disabled>Assign this chat</button>
           </div>
           <div id="sl-resolution" hidden>

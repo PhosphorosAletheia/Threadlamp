@@ -180,9 +180,9 @@
       } else if (["heartbeat_save", "heartbeat_run", "heartbeat_pause", "heartbeat_resume", "heartbeat_disable"].includes(action)) {
         result = await HeartbeatScheduler.dashboard({ type: action === "heartbeat_save" ? "HB_SAVE" : "HB_CONTROL",
           tabId: target.tabId, target, action: action.slice(10), configuration: payload.configuration }, sender);
-      } else if (["server_setup", "server_recover", "server_assign", "server_enable", "server_disable", "server_resolve"].includes(action)) {
+      } else if (["server_setup", "server_recover", "server_assign", "server_enable", "server_disable", "server_resolve", "server_forget"].includes(action)) {
         result = await ServerLinkWorker.dashboard({ type: action === "server_setup" ? "SL_SETUP" : action === "server_recover" ? "SL_RECOVER" : "SL_CONTROL",
-          tabId: target.tabId, target, action: action.slice(7), eventId: payload.eventId, resolution: payload.resolution }, sender);
+          tabId: target.tabId, target, action: action.slice(7), eventId: payload.eventId, resolution: payload.resolution, host: payload.host, confirmed: payload.confirmed, setupId: payload.setupId, pending: payload.pending }, sender);
       } else throw new Error("Unsupported dashboard action.");
       const response = result?.ok === false ? result : { ok: true, ...result };
       await saveReceipt(response);
@@ -230,7 +230,7 @@
     if (request.type === "ALERT_GET_SETTINGS") return {...alertSettings};
     if (request.type === "ALERT_SET_SETTINGS") return saveAlertSettings({soundEnabled:request.settings?.soundEnabled});
     if (request.type === "ALERT_TEST_SOUND") return playWorkstationAlert(true);
-    if (request.type === "LAN_LOOPBACK_PERMISSION") return {ok:true, granted:await chrome.permissions.contains({origins:["http://localhost/*", "http://127.0.0.1/*"]})};
+    if (request.type === "LAN_LOOPBACK_PERMISSION") return {ok:true, granted:await chrome.permissions.contains({origins:ServerLink.origins(request.host)})};
     if (request.type === "LAN_OPEN_OPTIONS") { await chrome.runtime.openOptionsPage(); return {ok:true}; }
     if (request.type === "LAN_OPEN_CHAT") {
       await verifyTarget(request.target);

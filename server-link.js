@@ -17,14 +17,42 @@
       return url.pathname.match(/^\/g\/(g-p-[a-f0-9]{32})(?:-[^/]+)?(?:\/|$)/i)?.[1].toLowerCase() || "";
     } catch { return ""; }
   }
+  function host(value = "localhost") {
+    if (typeof value !== "string") throw new Error("Enter localhost or a private LAN IPv4 address.");
+    const name = value.trim().toLowerCase() || "localhost";
+    if (["localhost", "127.0.0.1"].includes(name)) return name;
+    const parts = name.split(".");
+    if (parts.length === 4 && parts.every(p => /^(0|[1-9][0-9]{0,2})$/.test(p) && Number(p) <= 255)) {
+      const [a, b] = parts.map(Number);
+      if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) return name;
+    }
+    throw new Error("Enter localhost or a private LAN IPv4 address (10.x.x.x, 172.16–31.x.x, or 192.168.x.x).");
+  }
+  const loopback = name => ["localhost", "127.0.0.1"].includes(name);
+  const savedHost = record => host(record?.host || (record?.endpoint ? new URL(record.endpoint).hostname : "localhost"));
+  const origins = value => loopback(host(value)) ? ["http://localhost/*", "http://127.0.0.1/*"] : [`https://${host(value)}/*`];
   function endpoint(value) {
     const url = new URL(value);
-    if (url.protocol !== "ws:" || !["localhost", "127.0.0.1"].includes(url.hostname)
+    let name;
+    try { name = host(url.hostname); } catch { /* Report the endpoint contract below. */ }
+    if (!name || url.protocol !== (loopback(name) ? "ws:" : "wss:")
       || !url.port || Number(url.port) < 1024 || url.username || url.password
       || url.search || url.hash || url.pathname !== PATH) {
-      throw new Error(`Use ws://localhost:<fixed-port>${PATH}, with a port from 1024 to 65535.`);
+      throw new Error(`Use ws://localhost:<fixed-port>${PATH} or wss://<private-LAN-IP>:<fixed-port>${PATH}, with a port from 1024 to 65535.`);
     }
     return url.href;
+  }
+  function approvedEndpoint(record, value) {
+    const address = endpoint(value), actual = new URL(address).hostname, expected = savedHost(record);
+    if (actual !== expected && !(loopback(actual) && loopback(expected))) {
+      throw new Error("The server returned a different host from the one selected for this project. Forget the connection before choosing a different server.");
+    }
+    return address;
+  }
+  function networkInstructions(record) {
+    const name = savedHost(record);
+    return loopback(name) ? "Bind to loopback only. Use an unencrypted ws:// loopback endpoint."
+      : `Selected server host: ${name}. This is a LAN server, possibly on another computer. Use wss://${name}:PORT${PATH} with TLS and a certificate trusted by Chrome on the extension computer, whose subjectAltName includes this exact IP address. Keep the selected host and a fixed port from 1024 to 65535. Bind the service or its TLS reverse proxy to that LAN interface; limit access to the intended LAN clients. Never downgrade to plaintext ws:// or instruct the user to bypass certificate warnings. If you cannot configure this host or establish trusted TLS, request the missing access or certificate setup with [[LOGIC:USER_INPUT]].`;
   }
   function chatKey(value) {
     try {
@@ -66,10 +94,10 @@
   function readyInstructions(record) {
     const example = JSON.stringify({
       protocol: VERSION, setupId: record.setupId, projectId: record.projectId,
-      endpoint: record.endpoint || `ws://localhost:PORT${PATH}`
+      endpoint: record.endpoint || `${loopback(savedHost(record)) ? "ws" : "wss"}://${savedHost(record)}:PORT${PATH}`
     });
     return `SERVER_READY response format:
-The protocol number, setupId, projectId, and loopback endpoint below are connection metadata, not authentication secrets. Include their actual values in your reply. Pairing tokens and permanent credentials ARE secrets and must not appear in this block or your reply.
+The protocol number, setupId, projectId, and server endpoint below are connection metadata, not authentication secrets. Include their actual values in your reply. Pairing tokens and permanent credentials ARE secrets and must not appear in this block or your reply.
 Once the existing endpoint is ready, return exactly one complete SERVER_READY line inside a fenced plain-text code block, as shown below. Keep the marker and its JSON on one line. Copy this attempt's setupId and projectId exactly; replace PORT with the existing server's actual fixed port if needed. Do not redact these metadata fields, replace them with placeholders, or stop after the opening tag. Do not invent unknown values: explain what is missing and end with [[LOGIC:USER_INPUT]] instead.
 \`\`\`text
 [[SERVER_READY:${example}]]
@@ -86,7 +114,7 @@ Allowed WebSocket Origin: chrome-extension://${extensionId}
 Perform the configuration work yourself using your available authorized tools. Save the one-time pairing token in the existing server's private backend setup configuration, then consume/remove it after successful pairing. Do not ask the user to copy the code, run a command, or edit a file when you can do that work with your tools. The SERVER_SETUP_REQUEST tag is only a message correlation tag; do not store it as a credential or in framework configuration. If you genuinely lack access to the server or its configuration, name the exact missing access and end with [[LOGIC:USER_INPUT]]; do not claim setup is complete.
 The one-time token above is intentionally supplied in this setup chat. Use it directly without echoing it or asking the user to enter it again outside chat. Saving it to a file does not remove this existing chat copy. The permanent credential is different: generate it on the backend and never print it in chat.
 
-Inspect your persistent framework and existing local webserver first. Reuse completed integration work; do not create a second server or duplicate an existing service. Keep its existing port if it has one; otherwise choose an available port from 1024 to 65535. Persist that port in configuration and reuse it after every restart. If occupied by another process, report the conflict; do not stop that process or silently select a different port. Bind to loopback only.
+Inspect your persistent framework and existing local webserver first. Reuse completed integration work; do not create a second server or duplicate an existing service. Keep its existing port if it has one; otherwise choose an available port from 1024 to 65535. Persist that port in configuration and reuse it after every restart. If occupied by another process, report the conflict; do not stop that process or silently select a different port. ${networkInstructions(record)}
 Implement a WebSocket endpoint at ${PATH}. Validate the exact Origin above. All frames below are JSON and at most 16 KiB.
 ${BROWSER_HANDSHAKE_INSTRUCTIONS}
 
@@ -119,6 +147,7 @@ Perform server configuration and any required code/token storage yourself using 
 Any one-time pairing token supplied in this recovery prompt is intentionally already in chat. Use it directly without echoing it or asking the user to enter it again outside chat; saving it in a file does not remove the existing chat copy. The permanent backend credential is separate and must never be printed in chat.
 
 Inspect your previous work, framework documentation, saved configuration, and existing running service before making changes. Reuse the SAME server, port, code, submissions, outbox, processed IDs, and completed work. Do not create another server, choose a different port, reset application data, or repeat completed operations. If the existing service is stopped, start that same service using its saved configuration; if the port belongs to another process, or multiple candidate services make the identity unclear, report the conflict and end with [[LOGIC:USER_INPUT]]. If there is no identifiable existing server, request human input instead of creating one.
+${networkInstructions(record)}
 Check the existing ${PATH} WebSocket integration. Only repair missing or broken integration pieces on that server, using protocol ${VERSION} from the earlier setup instructions. Do not reinstall or rebuild working components.
 ${BROWSER_HANDSHAKE_INSTRUCTIONS}
 
@@ -130,5 +159,5 @@ Save this token yourself in the existing server's private backend setup configur
 ${readyInstructions(record)}
 Do not copy the old setup ID into it. The extension will verify the connection and send confirmation. Use [[LOGIC:CONTINUE]] only for another recovery round, [[LOGIC:WAIT:1m]] for an already started operation, or [[LOGIC:USER_INPUT]] if blocked. Do not work on unrelated tasks.`;
   }
-  globalThis.ServerLink = { VERSION, PATH, projectId, chatKey, proof, endpoint, ready, event, eventPrompt, readyInstructions, setupPrompt, recoveryPrompt };
+  globalThis.ServerLink = { VERSION, PATH, projectId, chatKey, proof, host, savedHost, origins, endpoint, approvedEndpoint, ready, event, eventPrompt, readyInstructions, setupPrompt, recoveryPrompt };
 })();

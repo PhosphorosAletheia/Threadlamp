@@ -6,10 +6,14 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const buttons = ["sl-setup", "sl-recover", "sl-toggle", "sl-assign", "sl-delivered", "sl-retry"].map($);
+  const buttons = ["sl-setup", "sl-recover", "sl-forget", "sl-toggle", "sl-assign", "sl-delivered", "sl-retry"].map($);
   let tab, record, busy = false;
   function render(connection) {
+    const hadRecord = Boolean(record);
     record = connection;
+    $("sl-host").disabled = busy || Boolean(connection);
+    if (connection || hadRecord) $("sl-host").value = connection ? ServerLink.savedHost(connection) : "localhost";
+    $("sl-forget").disabled = busy || !connection;
     $("sl-status").textContent = connection
       ? `${connection.phase}: ${connection.detail} ${connection.endpoint || ""} Pending events: ${connection.pending}.`
       : "No server connection configured for this project.";
@@ -54,10 +58,13 @@
         throw new Error("The selected conversation changed. Reopen the popup in the intended chat before setting up its server.");
       }
     };
-    // Request only loopback hosts, directly from the user's setup click.
-    const permission = chrome.permissions.request({ origins: ["http://localhost/*", "http://127.0.0.1/*"] });
+    let host;
+    try { host = record ? ServerLink.savedHost(record) : ServerLink.host($("sl-host").value); }
+    catch (error) { $("sl-status").textContent = error.message; return; }
+    // The exact host permission must be requested directly from the user's click.
+    const permission = chrome.permissions.request({ origins: ServerLink.origins(host) });
     return action(async () => {
-      if (!await permission) throw new Error("Local server permission was declined.");
+      if (!await permission) throw new Error("Server host permission was declined.");
       await verifyTab();
       // refreshStatus intentionally absorbs errors for display. A setup action
       // must instead stop on failure and bind to this exact page and revision.
@@ -69,12 +76,16 @@
         throw new Error("The chat controller could not be verified. No server setup was requested.");
       }
       await verifyTab();
-      return request(recovery ? "SL_RECOVER" : "SL_SETUP", {target:{tabId:expectedTab.id,
+      return request(recovery ? "SL_RECOVER" : "SL_SETUP", {host, target:{tabId:expectedTab.id,
         url:snapshot.url,instanceId:snapshot.instanceId,revision:snapshot.revision}});
     });
   }
   $("sl-setup").addEventListener("click", () => startSetup(false));
   $("sl-recover").addEventListener("click", () => startSetup(true));
+  $("sl-forget").addEventListener("click", () => {
+    if (busy || !record || !window.confirm(`Forget this project's connection? Remove saved pairing, event history and ${record.pending} pending server event(s) from Threadlamp. The server and its data remain. Fresh setup will be required.`)) return;
+    return action(() => request("SL_CONTROL", {action: "forget", confirmed: true, setupId: record.setupId, pending: record.pending}));
+  });
   $("sl-toggle").addEventListener("click", () => void action(() => request("SL_CONTROL", { action: record.enabled ? "disable" : "enable" })));
   $("sl-assign").addEventListener("click", () => void action(() => request("SL_CONTROL", { action: "assign" })));
   for (const [id, resolution] of [["sl-delivered", "delivered"], ["sl-retry", "retry"]]) {

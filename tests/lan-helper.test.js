@@ -7,6 +7,7 @@ const {init,privateHost} = require("../helper/cli.js"), {createHelper} = require
 const protocol = require("../lan-protocol.js");
 async function freePort() { const server=net.createServer(); server.listen(0,"127.0.0.1"); await once(server,"listening"); const port=server.address().port; await new Promise(r=>server.close(r)); return port; }
 test("LAN helper authenticates, restricts authority, and never replays uncertain commands", async t => {
+  assert.equal(protocol.allowed({type:"DB_COMMAND",action:"server_forget"}),true);
   assert.equal(protocol.allowed({type:"SUM_REWRITE",text:"A draft",limit:4000}),true);
   for(const type of ["SUM_GET","SUM_SAVE","SUM_FORGET","SUM_CLEAR","SUM_COMPLETE","Q_LOAD","Q_SAVE"]) assert.equal(protocol.allowed({type}),false);
   const parent=fs.mkdtempSync(path.join(os.tmpdir(),"threadlamp-lan-test-")), dir=path.join(parent,"private");
@@ -53,6 +54,7 @@ test("LAN helper authenticates, restricts authority, and never replays uncertain
   assert.match(login.headers["set-cookie"][0],/HttpOnly; Secure; SameSite=Strict/);
   const cookie=login.headers["set-cookie"][0].split(";")[0];
   const page=await req("/",undefined,cookie);assert.match(page.text,/src="\/lan-client.js"/);assert.match(page.text,/rel="manifest"/);assert.match(page.headers["content-security-policy"],/frame-ancestors 'none'/);
+  assert.match((await req("/server-link.js",undefined,cookie)).text,/approvedEndpoint/);
   assert.equal((await req("/helper/server.js",undefined,cookie)).status,404);
   assert.equal((await req("/config.json",undefined,cookie)).status,404);
   for(const type of ["HA_EXPORT_SETTINGS","HA_SAVE_SETTINGS","LAN_SAVE","DB_RECORD","SL_SETUP"]) {

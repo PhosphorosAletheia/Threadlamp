@@ -29,7 +29,7 @@
   globalThis.LanDashboardAPI = {
     sendMessage,
     reloadDashboard: options => globalThis.ThreadlampReloadDashboard(options),
-    requestLoopbackPermission: async () => (await checked({type:"LAN_LOOPBACK_PERMISSION"})).granted,
+    requestLoopbackPermission: async host => (await checked({type:"LAN_LOOPBACK_PERMISSION", host})).granted,
     openChat: agent => checked({type:"LAN_OPEN_CHAT",target:target(agent)}),
     openSettings: () => checked({type:"LAN_OPEN_OPTIONS"})
   };

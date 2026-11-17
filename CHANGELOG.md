@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.20.0 beta 1
+
+- Set up project servers on a private LAN IPv4 address, with encrypted WebSockets and a certificate trusted by Chrome. Bind setup replies to the selected host and request permission only for that host; existing localhost connections continue to work.
+- Add Forget connection to the popup and local/remote dashboards. Clear saved pairing and connection state so initial setup can run again, without deleting the server or its application data. Confirm pending inbox removal and block removal during in-progress or uncertain event delivery.
+- Keep recovery on the saved host and port. Ignore late socket messages and setup replies after a connection is forgotten.
+
 ## 1.19.3 beta 1
 
 - Bind the popup’s Set up connection and Recover connection buttons to the selected conversation and verified controller revision. Stop if permission is denied, the selected chat changes, or controller verification fails.

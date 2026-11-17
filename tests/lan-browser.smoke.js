@@ -13,8 +13,8 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     const config=JSON.parse(fs.readFileSync(path.join(privateDir,"config.json"))),password=fs.readFileSync(path.join(privateDir,"pairing.txt"),"utf8").match(/Dashboard access key: (.+)/)[1];
     helper=createHelper(config,{key:fs.readFileSync(path.join(privateDir,"server-key.pem")),cert:fs.readFileSync(path.join(privateDir,"server-cert.pem"))});await helper.start();
     bridge=new WebSocket(`ws://127.0.0.1:${bridgePort}/threadlamp/bridge`,{origin:`chrome-extension://${"a".repeat(32)}`});await once(bridge,"open");const ready=once(bridge,"message");bridge.send(JSON.stringify({type:"auth",protocol:1,token:config.bridgeToken}));await ready;
-    const agent={tabId:17,instanceId:"invented-agent",revision:"1",url:"https://chatgpt.com/c/example",title:"Example Project",chatTitle:"Example chat",online:true,running:false,mode:"idle",logicPhase:"idle",queuedPrompts:[],capabilities:{queue:true,queue_append:true,cancel_queue:true,start_logic:true}};
-    const actions=[],rewrites=[]; let diagnosticEnabled=true, diagnosticCleared=false;
+    const agent={tabId:17,instanceId:"invented-agent",revision:"1",url:"https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef-example/c/example",title:"Example Project",chatTitle:"Example chat",online:true,running:false,mode:"idle",logicPhase:"idle",queuedPrompts:[],capabilities:{queue:true,queue_append:true,cancel_queue:true,start_logic:true}};
+    const actions=[],rewrites=[],hostPermissions=[]; let diagnosticEnabled=true, diagnosticCleared=false, serverConnection=null, hostGranted=false;
     bridge.on("message",bytes=>{
       const message=JSON.parse(bytes);if(message.type!=="request")return;
       const r=message.request;let response={ok:true};
@@ -23,10 +23,13 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
       if(["DG_GET","DG_SET","DG_CLEAR"].includes(r.type))response={ok:true,enabled:diagnosticEnabled,eventCount:diagnosticCleared?0:4,incidentCount:diagnosticCleared?0:1};
       if(r.type==="DG_EXPORT")response={ok:true,report:{schema:1,enabled:diagnosticEnabled,events:[],incidents:[]}};
       if(r.type==="DB_LIST")response={ok:true,agents:[agent,{...agent,tabId:18,instanceId:"other-invented-agent",title:"Other Project",url:"https://chatgpt.com/c/other-example"}],events:[],version:"1.13.0"};
-      if(r.type==="DB_INSPECT")response={ok:true,schedule:null,connection:null,defaultPrompt:"Check scheduled work."};
+      if(r.type==="DB_INSPECT")response={ok:true,schedule:null,connection:serverConnection,defaultPrompt:"Check scheduled work."};
       if(r.type==="HA_GET_SETTINGS")response={enabled:false,approvalMessage:"Approved",connection:{phase:"disconnected"}};
       if(r.type==="ALERT_GET_SETTINGS")response={soundEnabled:true};
       if(r.type==="SUM_REWRITE"){rewrites.push(r);response={ok:true,text:"Please check the logs."};}
+      if(r.type==="LAN_LOOPBACK_PERMISSION"){hostPermissions.push(r.host);response={ok:true,granted:hostGranted};}
+      if(r.type==="DB_COMMAND" && r.action==="server_setup")serverConnection={projectId:"g-p-0123456789abcdef0123456789abcdef",setupId:"fake-setup",host:r.payload.host,url:agent.url,phase:"setup",detail:"Setting up",pending:0,uncertain:[]};
+      if(r.type==="DB_COMMAND" && r.action==="server_forget")serverConnection=null;
       if(r.type==="DB_COMMAND"){actions.push(r);if(["queue","queue_append"].includes(r.action))agent.queuedPrompts.push({id:String(actions.length),text:r.payload.text});}
       bridge.send(JSON.stringify({type:"response",id:message.id,response}));
     });
@@ -102,6 +105,26 @@ async function port(){const s=net.createServer();s.listen(0,"127.0.0.1");await o
     await evaluate('window.confirm=()=>true;setTimeout(()=>document.getElementById("refresh").click(),0)');
     await waitFor('!window.reloadSentinel && document.querySelectorAll(".agent-select").length === 2');
     assert.equal(actions.length,1,"reload never replays a queued command");
+    await evaluate('document.querySelector(".agent-select").click();document.getElementById("tab-server").click()');
+    await waitFor('!document.querySelector(\'[data-action="server_setup"]\').disabled');
+    await evaluate('document.getElementById("server-host").value="192.168.50.25";document.querySelector(\'[data-action="server_setup"]\').click()');
+    await waitFor('document.body.textContent.includes("Server host permission is missing")');
+    assert.equal(actions.length,1,"remote permission denial does not start setup");
+    assert.equal(hostPermissions.at(-1),"192.168.50.25");
+    hostGranted=true;
+    await evaluate('document.querySelector(\'[data-action="server_setup"]\').click()');
+    await waitFor('document.getElementById("server-host").disabled && !document.querySelector(\'[data-action="server_forget"]\').disabled');
+    assert.equal(actions.at(-1).payload.host,"192.168.50.25");
+    assert.equal(actions.at(-1).target.instanceId,"invented-agent");
+    const setupCount=actions.length;
+    await evaluate('window.confirm=()=>false;document.querySelector(\'[data-action="server_forget"]\').click()');
+    assert.equal(actions.length,setupCount,"cancelled Forget retains pairing");
+    await evaluate('window.confirm=()=>true;document.querySelector(\'[data-action="server_forget"]\').click()');
+    await waitFor('!document.getElementById("server-host").disabled');
+    assert.equal(actions.at(-1).action,"server_forget");
+    assert.deepEqual(actions.at(-1).payload,{confirmed:true,setupId:"fake-setup",pending:0});
+    assert.equal(await evaluate('document.getElementById("server-host").value'),"localhost");
+
     assert.equal(await evaluate('performance.getEntriesByType("navigation")[0].type'),"reload");
     assert.equal(await evaluate('document.getElementById("lan-camera-layout").value'),"right","camera choice survives reload");
     await evaluate('document.getElementById("lan-camera-layout").value="safe";document.getElementById("lan-camera-layout").dispatchEvent(new Event("change"))');

@@ -8,7 +8,7 @@
   "use strict";
   const api = globalThis.LanDashboardAPI || {
     sendMessage: request => chrome.runtime.sendMessage(request),
-    requestLoopbackPermission: () => chrome.permissions.request({origins:["http://localhost/*", "http://127.0.0.1/*"]}),
+    requestLoopbackPermission: host => chrome.permissions.request({origins:ServerLink.origins(host)}),
     openSettings: () => chrome.runtime.openOptionsPage(),
     openChat: async agent => {
       const tab = await chrome.tabs.get(agent.tabId);
@@ -134,6 +134,7 @@
     agent = agents.find(current => key(current) === key(agent)) || agent;
     if (selectedKey === key(agent)) { if (navigate) showWorkspace(); return; }
     editorEpoch += 1;
+    $("server-host").value = "localhost";
     selectedKey = key(agent); inspectedKey = ""; schedule = connection = null; lastInspection = 0;
     $("hb-status").textContent = $("server-status").textContent = agent.online ? "Loading…" : "This agent is offline.";
     $("uncertain").hidden = true;
@@ -217,6 +218,7 @@
         : action === "resume" ? !agent.paused
         : action === "pause" ? Boolean(agent.paused) : action === "next_cycle" ? !agent.capabilities?.next_cycle : false;
     }
+    $("server-host").disabled = busy || Boolean(connection) || inspectedKey !== selectedKey;
     $("open-chat").disabled = !agent.online;
     const state = formState();
     if (!state["queue-form"] && document.activeElement !== $("queued")) $("queued").value = "";
@@ -230,7 +232,10 @@
     try {
       const result = await request("DB_INSPECT", { target: target(agent) });
       if (selectedKey !== requestedKey) return;
-      schedule = result.schedule; connection = result.connection; inspectedKey = requestedKey; lastInspection = Date.now();
+      const hadConnection = Boolean(connection);
+      schedule = result.schedule; connection = result.connection;
+      if (connection || hadConnection) $("server-host").value = connection ? ServerLink.savedHost(connection) : "localhost";
+      inspectedKey = requestedKey; lastInspection = Date.now();
       $("hb-status").textContent = schedule ? `${schedule.phase}: ${schedule.detail} Next: ${time(schedule.nextRunAt)}` : "No heartbeat configured.";
       const saved = formState()["heartbeat-form"]?.values;
       const config = saved || { "hb-kind": schedule?.kind || "interval", "hb-interval": schedule?.intervalMinutes || 60,
@@ -465,7 +470,12 @@
           prompt: $("hb-prompt").value, limit: $("hb-limit").value, message: $("message").value, rolloverEnabled: $("rollover").checked });
         if (action === "server_resolve") payload = { eventId: $("server-event").value, resolution: button.dataset.resolution };
         if (["server_setup", "server_recover"].includes(action)) {
-          if (!await api.requestLoopbackPermission()) throw new Error("Local server permission was declined.");
+          payload.host = connection ? ServerLink.savedHost(connection) : ServerLink.host($("server-host").value);
+          if (!await api.requestLoopbackPermission(payload.host)) throw new Error("Server host permission is missing or declined. For a new host, start setup in the extension popup on the Chrome computer.");
+        }
+        if (action === "server_forget") {
+          if (!connection || !window.confirm(`Forget this project's connection? Remove saved pairing, event history and ${connection.pending} pending server event(s) from Threadlamp. The server and its data remain. Fresh setup will be required.`)) return;
+          payload = {confirmed: true, setupId: connection.setupId, pending: connection.pending};
         }
         const actionKey = selectedKey;
         const done = await act(agent, action, payload, expected);

@@ -11,6 +11,7 @@ const hash = value => crypto.createHash("sha256").update(String(value)).digest("
 const equal = (a, b) => crypto.timingSafeEqual(Buffer.from(hash(a), "hex"), Buffer.from(hash(b), "hex"));
 const token = () => crypto.randomBytes(32).toString("base64url");
 const assets = new Map([
+  ["/server-link.js", ["server-link.js", "text/javascript"]],
   ["/dashboard.js", ["dashboard.js", "text/javascript"]], ["/dashboard.css", ["dashboard.css", "text/css"]],
   ["/brand.css", ["brand.css", "text/css"]], ["/heartbeat.js", ["heartbeat.js", "text/javascript"]],
   ["/app.webmanifest", ["helper/app.webmanifest", "application/manifest+json"]],

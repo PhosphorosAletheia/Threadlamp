@@ -1,15 +1,16 @@
-# Local server connection — protocol 1
+# Project server connection — protocol 1
 
 Threadlamp can deliver project server events to an assigned ChatGPT conversation.
 This optional integration requires a compatible server on the computer running
-Chrome. A companion server is not included.
+Chrome or another computer on your LAN. A companion server is not included.
 
 ## Setup
 
 1. Open the saved ChatGPT conversation that should receive the project's events.
    Finish its current response and clear any draft.
-2. In the extension popup, expand **Local server connection for this project**
-   and select **Set up connection**. Allow Chrome's loopback host permission.
+2. In the extension popup, expand **Server connection for this project**.
+   Enter `localhost` for this computer or the server's private LAN IPv4 address,
+   then select **Set up connection**. Allow Chrome's permission for that host.
 3. Threadlamp sends integration instructions to the agent, which configures its
    server and returns a `SERVER_READY` block.
 4. Threadlamp verifies the endpoint, pairing, and transport, then sends a
@@ -29,6 +30,48 @@ the same chat page and attempt remain active. Abandoned attempts expire.
 A draft, manual pause, active task, or request for human input can prevent setup.
 Resolve the condition before retrying. **Stop** or **Disable** cancels setup
 without clearing manual text. The popup displays setup errors.
+
+## LAN servers
+
+Use an address in `10.0.0.0/8`, `172.16.0.0/12`, or `192.168.0.0/16`.
+Enter only the IP in **Server host**, without a scheme, port or path. Keep the
+address stable, for example with a DHCP reservation. The agent must have tools
+and access to configure that server; entering its IP does not grant access.
+
+LAN connections require `wss://` and a certificate trusted by Chrome on the
+computer running the extension. The certificate must include the selected IP
+in its subject alternative names. The server may provide TLS itself or use a
+TLS reverse proxy. Setup asks the agent to configure this and request human
+input if access or certificate trust is missing. Plaintext LAN connections,
+public IPs, hostnames and IPv6 are not supported in this version.
+
+The popup and local dashboard request permission for the selected host. The
+remote dashboard can check existing permission but cannot grant it on another
+computer: for a new host, start setup in the extension popup on the Chrome
+computer. The LAN dashboard helper and project server are separate connections.
+
+Recovery keeps the selected host and any saved port. Use **Forget connection**
+before changing the host. Existing localhost setups keep working unchanged.
+
+## Forget and run setup again
+
+Select **Forget connection** in the popup or dashboard and confirm. This closes
+the connection and removes Threadlamp's saved address, pairing credential, setup
+attempt, pending server events and completed-event history for that project.
+The confirmation displays the pending event count. In-progress or uncertain
+deliveries must be resolved first. Ordinary queued chat messages are unaffected.
+
+Forgetting does not stop or delete the server, its files, submissions or data,
+and does not delete earlier setup messages from chat history. It does not revoke
+Chrome host permission, which another project may share. A fresh setup uses a
+new pairing token and instructs the server to replace its old credential while
+reusing the existing service and data. Until then, the old credential remains
+on the server. The server must retain submissions and processed IDs; events
+already acknowledged by Threadlamp may not be sent again after inbox removal.
+
+After Forget, enter the desired host and select **Set up connection**. This runs
+initial setup rather than recovery. Late replies from the forgotten attempt
+cannot restore its connection.
 
 ## Recover a connection
 
@@ -77,10 +120,18 @@ The only supported endpoint is:
 ws://localhost:<fixed-port>/.well-known/continue-loop
 ```
 
-`127.0.0.1` is also supported. No remote addresses, arbitrary paths, URL
-credentials, fragments, or query strings are accepted. The server must bind only
-to loopback and validate the exact Origin. Plain `ws` is intended only for this
-local connection.
+`127.0.0.1` is also supported for loopback. LAN endpoints use:
+
+```text
+wss://<selected-private-IPv4>:<fixed-port>/.well-known/continue-loop
+```
+
+Ports must be from 1024 to 65535. Arbitrary hosts or paths, URL credentials,
+fragments and query strings are rejected. Loopback servers bind to loopback;
+LAN servers or their TLS proxies bind to the selected LAN interface. Both must
+validate the exact extension Origin and authenticate the connection. Plain
+`ws` is accepted only for loopback; LAN pairing requires TLS because the server
+returns the permanent credential during pairing.
 
 All messages are JSON, at most 16 KiB:
 

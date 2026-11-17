@@ -19,17 +19,17 @@ const elements = new Map(ids.map(id => [id, {
   appendChild(option) { this.options.push(option); if (!this.value) this.value = option.value; }
 }]));
 const $ = id => elements.get(id);
-let permission = false, permissionCalls = 0, poll, record = null;
+let confirmation = false, permission = false, permissionCalls = 0, poll, record = null;
 let activeTab = { id: 17, url: "https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef-research/c/one" };
 const requests = [];
 const context = {
   console, URL, Intl, Date,
   document: { getElementById: $, createElement: () => ({ value: "", textContent: "" }) },
-  window: { addEventListener() {} }, setInterval: fn => { poll = fn; return 1; }, clearInterval() {},
+  window: { addEventListener() {}, confirm: () => confirmation }, setInterval: fn => { poll = fn; return 1; }, clearInterval() {},
   getActiveTab: async () => activeTab, refreshStatus: async () => {},
   chrome: { permissions: { request: async request => {
     permissionCalls++;
-    assert.deepEqual(Array.from(request.origins), ["http://localhost/*", "http://127.0.0.1/*"]);
+    assert.deepEqual(Array.from(request.origins), $("sl-host").value === "192.168.50.25" ? ["https://192.168.50.25/*"] : ["http://localhost/*", "http://127.0.0.1/*"]);
     return permission;
   } }, tabs: {sendMessage:async (id,request)=>{
     assert.equal(id,17);assert.equal(request.type,"DB_SNAPSHOT");
@@ -37,8 +37,9 @@ const context = {
   }} },
   sendToBackground: async request => {
     requests.push(request);
-    if (["SL_SETUP", "SL_RECOVER"].includes(request.type)) record = { enabled: true, phase: "setup", pending: 0, uncertain: [], url: activeTab.url };
+    if (["SL_SETUP", "SL_RECOVER"].includes(request.type)) record = { setupId:"setup-one", host:request.host, enabled: true, phase: "setup", pending: 0, uncertain: [], url: activeTab.url };
     if (request.type === "SL_CONTROL" && request.action === "disable") record = { ...record, enabled: false, phase: "disabled" };
+    if (request.type === "SL_CONTROL" && request.action === "forget") record = null;
     return { ok: true, connection: record };
   }
 };
@@ -90,5 +91,20 @@ const click = async id => { $(id).listeners.click(); await flush(); };
   await click("sl-retry");
   assert.equal(requests.at(-1).eventId, "event-one");
   assert.equal(requests.at(-1).resolution, "retry");
+  const beforeForget = requests.length;
+  await click("sl-forget");
+  assert.equal(requests.length, beforeForget, "cancelled confirmation leaves pairing intact");
+  confirmation = true;
+  await click("sl-forget");
+  assert.equal(requests.at(-1).action, "forget");
+  assert.equal(requests.at(-1).setupId, "setup-one");
+  assert.equal(requests.at(-1).pending, 1);
+  assert.equal($("sl-host").disabled, false);
+  assert.equal($("sl-setup").hidden, false);
+  $("sl-host").value = "192.168.50.25";
+  await click("sl-setup");
+  assert.equal(requests.at(-1).type, "SL_SETUP");
+  assert.equal(requests.at(-1).host, "192.168.50.25");
+  assert.equal($("sl-host").disabled, true);
   console.log("server connection popup controls tests passed");
 })().catch(error => { console.error(error); process.exitCode = 1; });
