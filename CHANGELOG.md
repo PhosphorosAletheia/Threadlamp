@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.21.4 beta 1
+
+- Handle the first delivery timeout in a loaded chat as CONTINUE too. Send the normal configured follow-up without reloading first, while preserving queue handling, message limits, draft protection and send verification.
+
 ## 1.21.3 beta 1
 
 - Treat a repeated delivery timeout after reconnection as CONTINUE when the saved chat is loaded and its last send is confirmed. Send the configured follow-up with normal queue handling and message limits, without replaying the interrupted prompt or clicking Retry.

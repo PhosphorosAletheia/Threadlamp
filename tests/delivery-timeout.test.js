@@ -169,6 +169,7 @@ async function conversationLoadTests() {
 async function runTests() {
   await conversationLoadTests();
   let f = fixture();
+  f.notice.textContent = "Error in message stream Retry";
   let reloads = 0;
   f.window.location.reload = () => { reloads++; };
   assert.equal(f.api.findConnectionErrorNotice(), f.notice);
@@ -193,6 +194,7 @@ async function runTests() {
   for (const change of ["draft", "queued", "second-stream-error", "second-other-error", "no-checkpoint", "storage-failure"]) {
     f = fixture();
     f.window.location.reload = () => { throw new Error("Unexpected reload"); };
+    if (["draft", "queued", "storage-failure"].includes(change)) f.notice.textContent = "Error in message stream Retry";
     if (change === "draft") f.composer.innerText = f.composer.textContent = "My draft";
     if (change === "queued") f.api.queueAdditionalPrompt("Queued instruction");
     if (change === "second-stream-error") { f.api.setReconnectAttemptedForTest(true); f.notice.textContent = "Error in message stream Retry"; }
@@ -206,10 +208,10 @@ async function runTests() {
     assert.equal(f.api.getOverlayForTest().isConnected, true, change);
   }
 
-  for (const outcome of ["idle", "timeout", "queued"]) {
+  for (const reconnected of [false, true]) for (const outcome of ["idle", "timeout", "queued"]) {
     f = fixture(outcome === "timeout" ? ["timeout", "idle"] : ["idle"]);
-    f.api.setReconnectAttemptedForTest(true);
-    f.window.location.reload = () => { throw new Error("Repeated timeout must use CONTINUE"); };
+    f.api.setReconnectAttemptedForTest(reconnected);
+    f.window.location.reload = () => { throw new Error("A loaded chat timeout must use CONTINUE, including its first occurrence"); };
     if (outcome === "queued") f.api.queueAdditionalPrompt("Queued instruction");
     await f.run();
     assert.equal(f.sends.length, outcome === "timeout" ? 2 : 1, outcome + ": " + f.api.state.detail);
@@ -220,9 +222,9 @@ async function runTests() {
     assert.equal(f.requests.some(r => r.type === "LR_PREPARE"), false);
   }
 
-  for (const change of ["stop", "draft", "navigate", "changed-error", "limit", "unconfirmed-send", "monitor"]) {
+  for (const reconnected of [false, true]) for (const change of ["stop", "draft", "navigate", "changed-error", "limit", "unconfirmed-send", "monitor"]) {
     f = fixture(change === "unconfirmed-send" ? ["timeout-no-user"] : ["idle"]);
-    f.api.setReconnectAttemptedForTest(true);
+    f.api.setReconnectAttemptedForTest(reconnected);
     f.window.location.reload = () => { throw new Error("Unexpected reload"); };
     if (change === "draft") f.composer.innerText = "Preserve my draft";
     if (change === "limit") f.api.state.count = f.api.state.limit;
@@ -268,6 +270,7 @@ async function runTests() {
   }
   for (const change of ["stop", "navigate", "draft", "notice-disappeared", "busy"]) {
     f = fixture();
+    f.notice.textContent = "Error in message stream Retry";
     f.window.location.reload = () => { throw new Error("Unexpected reload"); };
     f.onTick(() => {
       if (change === "stop") { f.api.state.running = false; f.api.state.runId++; }

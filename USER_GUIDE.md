@@ -39,9 +39,10 @@ Stopping a sleeping chat does not send that shutdown message.
 ## Connection error recovery
 
 During an active Logic run, Threadlamp saves a temporary checkpoint for that tab
-and conversation. A **Message delivery timed out. Please try again.** or
-**Error in message stream** alert with a Retry button triggers a 30-second wait
-and one initial reload. The empty-page error **Could not load this ChatGPT
+and conversation. **Message delivery timed out. Please try again.** in a loaded
+chat follows the normal **CONTINUE** path immediately, including its first
+occurrence; no reload is required. An **Error in message stream** alert with a
+Retry button triggers a 30-second wait and one initial reload. The empty-page error **Could not load this ChatGPT
 conversation** starts recovery after 20 seconds. Threadlamp never clicks Retry or
 resends the interrupted prompt. Text quoted inside a chat response does not
 trigger recovery.
@@ -59,9 +60,8 @@ does not consume a follow-up. Blank or partially loaded pages no longer hit a
 60-second verification cutoff. If a loaded conversation still has a different
 last submitted message after a minute of verification, recovery pauses for review.
 
-If **Message delivery timed out. Please try again.** persists or happens again
-in a loaded chat after reconnection, Threadlamp treats that exact alert as
-**CONTINUE**. It sends the configured follow-up, including the next queued
+Whenever **Message delivery timed out. Please try again.** appears in a loaded
+chat, Threadlamp treats that exact alert as **CONTINUE**. It sends the configured follow-up, including the next queued
 instruction, and counts it toward the normal message limit. This is a new
 follow-up; it does not replay the interrupted prompt or click Retry. The last
 send must have appeared as a submitted user message before another follow-up is
@@ -76,7 +76,7 @@ for an active, planned recovery remain available until recovery finishes or is
 cancelled. Ordinary inactive checkpoints expire after ten minutes. Checkpoints
 are stored for the browser session and are not a permanent backup.
 
-This requires a checkpoint from a running Logic cycle. A chat already stopped by
+Reload recovery requires a checkpoint from a running Logic cycle. A chat already stopped by
 an older version's recovery error cannot recover its discarded checkpoint: once
 the page loads, use **Resume** in the popup's Logic Mode section or **Resume after
 reload** in the dashboard to observe its existing response without sending startup

@@ -151,9 +151,10 @@ async function decoratedQueueTests() {
   f = fixture(["timeout", "idle"]);
   f.api.queueAdditionalPrompt("Extra request");
   await f.run();
-  assert.deepEqual(f.sends, [], "timeout does not resend or consume a queued request");
-  assert.equal(f.api.getQueuedPromptForTest().text, "Extra request");
-  assert.equal(f.api.state.error, true, "timeout must not replay the queued request");
+  assert.deepEqual(f.sends, [combined("Configured followup", "Extra request"), "Configured followup"],
+    "timeout follows CONTINUE and consumes queued text only once, even if the next response times out too");
+  assert.equal(f.api.getQueuedPromptForTest(), null);
+  assert.equal(f.api.state.error, false, "a confirmed timeout follows CONTINUE without replaying queued instructions");
 
   f = normal();
   f.api.queueAdditionalPrompt("Wakeup instructions");

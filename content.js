@@ -680,7 +680,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   }
 
   function canContinueAfterDeliveryTimeout(response) {
-    if (!reconnectAttempted || response?.reason !== "delivery_timeout") return false;
+    if (response?.reason !== "delivery_timeout") return false;
     const user = latestMessageSnapshot("user");
     const submitted = runOwnership?.submitted;
     return Boolean(normalizeText(response.notice?.textContent).includes(DELIVERY_TIMEOUT_MESSAGE)
@@ -4208,7 +4208,7 @@ ${LOGIC_START_PROMPT}
           // Reuse the normal CONTINUE path, including limits, manual activity,
           // durable queued instructions and submission ownership checks.
           response = latestMessageSnapshot("assistant");
-          setDetail("Delivery timed out again after reconnection. Continuing with the next Logic message…");
+          setDetail("Delivery timed out. Continuing with the next Logic message…");
           recordDiagnostic("state", {reason: "delivery_timeout"});
         }
 
