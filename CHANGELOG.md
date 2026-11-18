@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.21.3 beta 1
+
+- Treat a repeated delivery timeout after reconnection as CONTINUE when the saved chat is loaded and its last send is confirmed. Send the configured follow-up with normal queue handling and message limits, without replaying the interrupted prompt or clicking Retry.
+- Keep Stop, draft and chat ownership checks. Block continuation for unconfirmed delivery, other errors or incomplete pages, and keep the recovery monitor from racing the Logic loop.
+
 ## 1.21.2 beta 1
 
 - Fix the remaining 60-second pause when a planned recovery reaches a blank or partially loaded page instead of the exact conversation-loading error banner. Retry these pages every 20 seconds without an attempt or total time limit.

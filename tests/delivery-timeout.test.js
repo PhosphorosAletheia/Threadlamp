@@ -190,12 +190,13 @@ async function runTests() {
   await f.api.recoverConnectionError(1, f.api.connectionErrorResponse());
   assert.equal(reloads, 2, "empty page reloads using the earlier checkpoint");
 
-  for (const change of ["draft", "queued", "second-timeout", "no-checkpoint", "storage-failure"]) {
+  for (const change of ["draft", "queued", "second-stream-error", "second-other-error", "no-checkpoint", "storage-failure"]) {
     f = fixture();
     f.window.location.reload = () => { throw new Error("Unexpected reload"); };
     if (change === "draft") f.composer.innerText = f.composer.textContent = "My draft";
     if (change === "queued") f.api.queueAdditionalPrompt("Queued instruction");
-    if (change === "second-timeout") f.api.setReconnectAttemptedForTest(true);
+    if (change === "second-stream-error") { f.api.setReconnectAttemptedForTest(true); f.notice.textContent = "Error in message stream Retry"; }
+    if (change === "second-other-error") { f.api.setReconnectAttemptedForTest(true); f.setAlerts([visibleElement("Something went wrong. Please try again.")]); }
     if (change === "no-checkpoint") f.api.setTimeoutSnapshotsForTest(() => ({ element: null, text: "" }));
     if (change === "storage-failure") f.setRequestHandler(async r => r.type.startsWith("LR_") ? { ok: false, error: "Storage unavailable" } : { ok: true });
     await f.run();
@@ -203,6 +204,53 @@ async function runTests() {
     assert.equal(f.api.state.error, true, change);
     assert.equal(f.api.state.logicPhase, "recovery_paused", change);
     assert.equal(f.api.getOverlayForTest().isConnected, true, change);
+  }
+
+  for (const outcome of ["idle", "timeout", "queued"]) {
+    f = fixture(outcome === "timeout" ? ["timeout", "idle"] : ["idle"]);
+    f.api.setReconnectAttemptedForTest(true);
+    f.window.location.reload = () => { throw new Error("Repeated timeout must use CONTINUE"); };
+    if (outcome === "queued") f.api.queueAdditionalPrompt("Queued instruction");
+    await f.run();
+    assert.equal(f.sends.length, outcome === "timeout" ? 2 : 1, outcome + ": " + f.api.state.detail);
+    assert.ok(f.sends.every(text => text.startsWith("Configured followup")), outcome);
+    if (outcome === "queued") assert.ok(f.sends[0].includes("Queued instruction"));
+    assert.equal(f.api.state.count, f.sends.length);
+    assert.equal(f.api.state.error, false, outcome);
+    assert.equal(f.requests.some(r => r.type === "LR_PREPARE"), false);
+  }
+
+  for (const change of ["stop", "draft", "navigate", "changed-error", "limit", "unconfirmed-send", "monitor"]) {
+    f = fixture(change === "unconfirmed-send" ? ["timeout-no-user"] : ["idle"]);
+    f.api.setReconnectAttemptedForTest(true);
+    f.window.location.reload = () => { throw new Error("Unexpected reload"); };
+    if (change === "draft") f.composer.innerText = "Preserve my draft";
+    if (change === "limit") f.api.state.count = f.api.state.limit;
+    if (change === "monitor") {
+      f.setAlerts([f.notice]);
+      await f.api.monitorLogicReconnect();
+      assert.equal(f.api.state.error, false);
+      assert.equal(f.api.state.running, true);
+      assert.deepEqual(f.sends, [], "monitor never sends independently");
+    }
+    if (["stop", "draft"].includes(change)) f.onTick(() => { f.api.state.running = false; f.api.state.runId++; });
+    if (["navigate", "changed-error"].includes(change)) f.setWriter((target,text) => {
+      target.innerText = target.textContent = text;
+      f.setSelector("button[data-testid='send-button']", [f.send]);
+      if (change === "navigate") f.window.location = new URL("https://chatgpt.com/c/different");
+      else f.notice.textContent = "Error in message stream Retry";
+      return true;
+    });
+    await f.run();
+    if (change === "limit") {
+      assert.equal(f.sends.filter(text => text === "Configured followup").length, 0);
+      assert.equal(f.api.state.count, f.api.state.limit);
+    } else if (change === "unconfirmed-send") {
+      assert.equal(f.sends.length, 1, "never repeat a send that was not observed");
+      assert.equal(f.api.state.error, true);
+    } else if (change === "monitor") assert.deepEqual(f.sends, ["Configured followup"]);
+    else assert.deepEqual(f.sends, [], change);
+    if (change === "draft") assert.equal(f.composer.innerText, "Preserve my draft");
   }
 
   for (const change of ["old", "extra-text", "wrong-text", "disabled-retry", "ambiguous", "inside-transcript"]) {
@@ -271,7 +319,7 @@ async function runTests() {
     }
     assert.deepEqual(f.sends, [], condition);
   }
-  for (const response of ["IDLE", "CONTINUE", "GENERATING"]) {
+  for (const response of ["IDLE", "CONTINUE", "GENERATING", "TIMEOUT"]) {
     f = fixture(); f.hide();
     f.assistant().textContent = f.assistant().innerText = `Recovered response.\n[[LOGIC:${response === "GENERATING" ? "IDLE" : response}]]`;
     const settings = { message: "Configured followup", limit: 5, count: 3, rolloverEnabled: true, verifiedUser: true,
@@ -285,11 +333,15 @@ async function runTests() {
       f.setSelector("button[data-testid='stop-button']", [visibleElement()]);
       f.onTick(now => { if (now >= 10000) f.setSelector("button[data-testid='stop-button']", []); });
     }
+    if (response === "TIMEOUT") {
+      f.notice.getBoundingClientRect = () => ({width: 100, height: 40});
+      f.setAlerts([f.notice]);
+    }
     await f.api.restoreLogicReconnect();
     assert.equal(runs.length, 1);
     await runs[0];
-    assert.deepEqual(f.sends, response === "CONTINUE" ? ["Configured followup"] : [], response);
-    assert.equal(f.api.state.count, response === "CONTINUE" ? 4 : 3, response);
+    assert.deepEqual(f.sends, ["CONTINUE", "TIMEOUT"].includes(response) ? ["Configured followup"] : [], response);
+    assert.equal(f.api.state.count, ["CONTINUE", "TIMEOUT"].includes(response) ? 4 : 3, response);
     assert.equal(f.api.state.error, false, response);
   }
   console.log("timeout reconnection: empty page, one reload, ownership, no prompt replay, restored monitoring and visible failure passed");

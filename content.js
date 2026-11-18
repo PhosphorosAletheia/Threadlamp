@@ -477,8 +477,10 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     } finally {updateRecoveryReady=true;}
   }
 
-  function reconnectPageError() {
+  function reconnectPageError(ignoredNotice = null) {
     return [...document.querySelectorAll("[role='alert']")].find(e => isVisible(e)
+      && !(ignoredNotice && (e === ignoredNotice || e.contains?.(ignoredNotice))
+        && normalizeText(e.textContent) === normalizeText(ignoredNotice.textContent))
       && !e.closest("article, [data-message-author-role], .markdown, .prose")
       && /error|try again|too many requests|rate limit|unable to load|something went wrong/i.test(e.textContent || ""));
   }
@@ -578,7 +580,8 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   }
 
   function assertReconnectPageHasNoOtherError() {
-    if (!findConversationLoadError() && (findConnectionErrorNotice() || hasMaximumLengthNotice() || reconnectPageError())) {
+    if (!findConversationLoadError() && !canContinueAfterDeliveryTimeout(connectionErrorResponse())
+      && (findConnectionErrorNotice() || hasMaximumLengthNotice() || reconnectPageError())) {
       throw new Error("ChatGPT reported another error after reload.");
     }
   }
@@ -676,12 +679,26 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     } finally { reconnectRestoring = false; }
   }
 
+  function canContinueAfterDeliveryTimeout(response) {
+    if (!reconnectAttempted || response?.reason !== "delivery_timeout") return false;
+    const user = latestMessageSnapshot("user");
+    const submitted = runOwnership?.submitted;
+    return Boolean(normalizeText(response.notice?.textContent).includes(DELIVERY_TIMEOUT_MESSAGE)
+      && response.notice === findConnectionErrorNotice() && !isGenerating()
+      && !hasMaximumLengthNotice() && !reconnectPageError(response.notice)
+      && findComposer() && user.element && user.text && messageSnapshotId(user)
+      && (!submitted || snapshotChanged(user, submitted.before)));
+  }
+
   async function monitorLogicReconnect() {
     if (reconnectRestoring || reconnectPending) return;
     if (!state.running || state.mode !== "logic" || state.paused || state.error) { timeoutSeenAt = null; return; }
     if (!["monitoring", "starting", "resuming"].includes(state.logicPhase)) return;
-    if (reconnectAttempted && reconnectPageError()) { pauseReconnect("ChatGPT reported another error after reconnection."); return; }
     const timeout = connectionErrorResponse();
+    // The Logic loop owns sending. The background monitor must not pause or
+    // dispatch a second continuation while that loop handles this exact alert.
+    if (canContinueAfterDeliveryTimeout(timeout)) { timeoutSeenAt = null; return; }
+    if (reconnectAttempted && reconnectPageError()) { pauseReconnect("ChatGPT reported another error after reconnection."); return; }
     if (timeout) {
       timeoutSeenAt ??= Date.now();
       if (Date.now() - timeoutSeenAt >= ACTIVITY_WINDOW_MS) await recoverConnectionError(state.runId, timeout);
@@ -4177,9 +4194,22 @@ ${LOGIC_START_PROMPT}
       while (response && state.running && state.runId === runId) {
         if (!await waitForLogicResume(runId)) return;
 
+        const timeoutContinuation = canContinueAfterDeliveryTimeout(response) ? response : null;
         if (response.connectionError) {
-          await recoverConnectionError(runId, response);
-          return;
+          if (!timeoutContinuation) {
+            await recoverConnectionError(runId, response);
+            return;
+          }
+          await assertRunLocation(runId);
+          if (!state.running || state.runId !== runId) return;
+          if (!canContinueAfterDeliveryTimeout(timeoutContinuation)) {
+            throw new Error("The response changed before timeout continuation. Inspect the chat before resuming.");
+          }
+          // Reuse the normal CONTINUE path, including limits, manual activity,
+          // durable queued instructions and submission ownership checks.
+          response = latestMessageSnapshot("assistant");
+          setDetail("Delivery timed out again after reconnection. Continuing with the next Logic message…");
+          recordDiagnostic("state", {reason: "delivery_timeout"});
         }
 
         // Multiple manual messages can be queued before one assistant reply.
@@ -4194,9 +4224,11 @@ ${LOGIC_START_PROMPT}
           directive,
           flag,
           generatedImageFallback
-        } = classifyLogicResponse(response);
+        } = timeoutContinuation
+          ? {directive: {flag: "continue"}, flag: "continue", generatedImageFallback: false}
+          : classifyLogicResponse(response);
 
-        publishOutputSummary(response, directive.flag);
+        if (!timeoutContinuation) publishOutputSummary(response, directive.flag);
         const restoredPhase = updateResume?.phase;
         const restoredWaitUntil = updateResume?.waitUntil;
         updateResume = null;
@@ -4367,7 +4399,13 @@ ${LOGIC_START_PROMPT}
           generatedImageFallback
             ? `Generated image completed without a Logic flag. Sending message ${state.count + 1} of ${state.limit}…`
             : `Logic Mode is sending message ${state.count + 1} of ${state.limit}…`,
-          null, Infinity, null, true
+          null, Infinity, timeoutContinuation ? async () => {
+            if (!canContinueAfterDeliveryTimeout(timeoutContinuation)
+              || snapshotChanged(latestMessageSnapshot("user"), userBeforeAutomaticSend)) {
+              throw new Error("The response changed before timeout continuation. No follow-up was sent.");
+            }
+            return true;
+          } : null, true
         );
         if (!sent || state.runId !== runId) return;
 

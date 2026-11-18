@@ -59,7 +59,17 @@ does not consume a follow-up. Blank or partially loaded pages no longer hit a
 60-second verification cutoff. If a loaded conversation still has a different
 last submitted message after a minute of verification, recovery pauses for review.
 
-Other errors or a changed message leave Logic Mode visibly paused. Drafts and queued instructions also pause recovery so they are not lost.
+If **Message delivery timed out. Please try again.** persists or happens again
+in a loaded chat after reconnection, Threadlamp treats that exact alert as
+**CONTINUE**. It sends the configured follow-up, including the next queued
+instruction, and counts it toward the normal message limit. This is a new
+follow-up; it does not replay the interrupted prompt or click Retry. The last
+send must have appeared as a submitted user message before another follow-up is
+allowed. Drafts, navigation, Stop and other simultaneous errors block sending.
+
+Other errors, including a repeated **Error in message stream**, or a changed
+message leave Logic Mode visibly paused. Drafts and queued instructions block
+reloading so they are not lost.
 **Stop** cancels recovery without sending a shutdown prompt. An unrelated manual
 reload restores a recent checkpoint in a paused state for review. Checkpoints
 for an active, planned recovery remain available until recovery finishes or is
