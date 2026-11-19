@@ -305,8 +305,25 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
     return null;
   }
 
+  function pendingUserInputResponse() {
+    if (state.mode !== "logic") return null;
+    const assistant = latestMessageSnapshot("assistant");
+    if (!assistant.element || parseLogicDirective(assistant.text).flag !== "user_input") return null;
+    return elementComesAfter(latestMessageSnapshot("user").element, assistant.element) ? null : assistant;
+  }
+
+  function inputWaitHasReply(user, waiting) {
+    const id = messageSnapshotId(user);
+    // React can replace a bubble without a person submitting a new message.
+    if (waiting.userId) return Boolean(id && id !== waiting.userId);
+    return snapshotChanged(user, waiting.baseline)
+      && (user.text !== waiting.baseline.text || elementComesAfter(user.element, latestMessageSnapshot("assistant").element));
+  }
+
   function connectionErrorResponse() {
-    if (state.mode !== "logic" || isGenerating()) return null;
+    if (state.mode !== "logic" || isGenerating()
+      || (state.logicPhase === "waiting_user" && serverInputWait?.runId === state.runId)
+      || pendingUserInputResponse()) return null;
     const loadingError = findConversationLoadError();
     if (loadingError) return {connectionError: true, notice: loadingError, element: null, text: "", reason: "conversation_load_failed"};
     const notice = findConnectionErrorNotice();
@@ -680,7 +697,7 @@ Logic Mode is now turned off. Stop adding ${LOGIC_CONTINUE_FLAG}, ${LOGIC_USER_I
   }
 
   function canContinueAfterDeliveryTimeout(response) {
-    if (response?.reason !== "delivery_timeout") return false;
+    if (response?.reason !== "delivery_timeout" || state.logicPhase === "waiting_user" || pendingUserInputResponse()) return false;
     const user = latestMessageSnapshot("user");
     const submitted = runOwnership?.submitted;
     return Boolean(normalizeText(response.notice?.textContent).includes(DELIVERY_TIMEOUT_MESSAGE)
@@ -1314,7 +1331,7 @@ ${LOGIC_START_PROMPT}
     const idle = !state.running && safe;
     const waiting = state.running && state.mode === "logic" && state.logicPhase === "waiting_user"
       && !state.paused && !state.error && serverInputWait?.runId === state.runId
-      && !snapshotChanged(user, serverInputWait.baseline);
+      && !inputWaitHasReply(user, serverInputWait);
     return { ...publicStatus(), projectTitle: dashboardProjectTitle(), url: window.location.href.split(/[?#]/)[0], instanceId: heartbeatInstanceId,
       revision: String(dashboardRevision), message: state.message || "Continue", limit: state.limit || 5,
       hasDraft: draft, generating, queuedPrompt: queuedPrompts[0]?.url === window.location.href ? queuedPrompts[0].text : "", queueNote: queuedPromptNote,
@@ -1694,14 +1711,8 @@ ${LOGIC_START_PROMPT}
 
   function acceptServerWake(request) {
     if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
-    if (serverInputWait?.runId === state.runId && state.running && state.mode === "logic"
-      && state.logicPhase === "waiting_user" && !state.paused && !state.error && !serverSetup
-      && request.url === serverInputWait.url.split(/[?#]/)[0]
-      && window.location.href === serverInputWait.url) {
-      // The existing wait owns sending. A wake only asks it to check the inbox,
-      // so duplicate wakes cannot create competing Logic Mode runners.
-      serverInputWait.pending = true;
-      return { accepted: true };
+    if (state.logicPhase === "waiting_user" || pendingUserInputResponse()) {
+      return {accepted: false, blocked: true, detail: "Waiting for your reply. Server events remain queued until you respond."};
     }
     if (serverSetup || request.url !== window.location.href.split(/[?#]/)[0]
       || state.mode !== "logic" || !state.running || state.logicPhase !== "sleeping"
@@ -3365,10 +3376,6 @@ ${LOGIC_START_PROMPT}
       && state.mode === "logic"
       && state.paused
     ) {
-      if (hasMaximumLengthNotice()) {
-        stopForMaximumLength();
-        return false;
-      }
       await sleep(POLL_MS);
       await assertRunLocation(runId);
     }
@@ -3534,6 +3541,9 @@ ${LOGIC_START_PROMPT}
     requireServerEvent = false,
     heartbeatHandoff = null
   ) {
+    if (state.logicPhase === "waiting_user" && userInputDelivery?.runId !== runId) {
+      throw new Error("This agent is waiting for your reply. Automatic sending is blocked.");
+    }
     await queueStore.flush();
     const composer = await waitForReady(runId, readyTimeoutMs);
     if (!composer || !state.running || state.runId !== runId) return false;
@@ -3563,6 +3573,7 @@ ${LOGIC_START_PROMPT}
       if (window.location.href !== serverUrl
         || snapshotChanged(latestMessageSnapshot("user"), serverUser)
         || state.paused || state.error || state.mode !== sendMode
+        || (state.logicPhase === "waiting_user" && userInputDelivery?.runId !== runId)
         || ((!expectedDraft || serverLease) && currentComposer !== composer)
         || !currentComposer || !composerDraftMatches(currentComposer, expectedDraft) || isGenerating()) {
         throw new Error("The chat or draft changed while preparing the automatic message. No message was sent.");
@@ -3725,6 +3736,8 @@ ${LOGIC_START_PROMPT}
 
     while (state.running && state.runId === runId) {
       if (!await waitForLogicResume(runId)) return null;
+      const inputResponse = !isGenerating() && pendingUserInputResponse();
+      if (inputResponse) return inputResponse;
       if (hasMaximumLengthNotice()) {
         stopForMaximumLength();
         return null;
@@ -3790,6 +3803,8 @@ ${LOGIC_START_PROMPT}
 
     while (state.running && state.runId === runId) {
       if (!await waitForLogicResume(runId)) return null;
+      const inputResponse = !isGenerating() && pendingUserInputResponse();
+      if (inputResponse) return inputResponse;
       if (hasMaximumLengthNotice()) {
         stopForMaximumLength();
         return null;
@@ -3862,52 +3877,16 @@ ${LOGIC_START_PROMPT}
   }
 
   async function waitForServerOrUserInput(runId, previousUser) {
-    const waiting = { runId, url: window.location.href, pending: true, baseline: previousUser };
+    const waiting = { runId, url: window.location.href, baseline: previousUser, userId: messageSnapshotId(previousUser) };
     serverInputWait = waiting;
     try {
       while (state.running && state.runId === runId) {
-        if (window.location.href !== waiting.url) throw new Error("The chat changed while waiting for input. No server notification was sent.");
-        if (hasMaximumLengthNotice()) { stopForMaximumLength(); return null; }
+        await assertRunLocation(runId);
+        if (window.location.href !== waiting.url) throw new Error("The chat changed while waiting for input.");
         const user = latestMessageSnapshot("user");
-        if (snapshotChanged(user, previousUser)) return user;
-        if (waiting.pending && state.logicPhase === "waiting_user" && !state.paused && !state.error
-          && !serverSetup && userInputDelivery?.runId !== runId && !isGenerating()
-          && findComposer() && !composerText(findComposer()) && state.count < state.limit
-          && typeof ServerLink !== "undefined" && ServerLink.projectId(waiting.url)) {
-          waiting.pending = false;
-          const delivery = userInputDelivery = { runId };
-          const previousDetail = state.detail;
-          // This phase enables the usual durable event claim and rejects phone
-          // replies until the send either finishes or returns without an event.
-          state.logicPhase = "sending_server_input";
-          try {
-            const guard = () => state.running && state.runId === runId && !state.paused && !state.error
-              && window.location.href === waiting.url
-              && !snapshotChanged(latestMessageSnapshot("user"), previousUser);
-            const sent = await submitMessage(
-              runId,
-              "A form submission arrived from this project's connected server while you were waiting for user input. Retrieve the referenced submission and check whether it answers your request. If more input is needed, ask again. Follow the existing Logic Mode instructions.",
-              "Sending the form submission notification to ChatGPT…",
-              composer => guard() && !composerText(composer),
-              10000, guard, true, true
-            );
-            if (sent && state.running && state.runId === runId) {
-              // submitMessage already confirmed the exact event-bearing user
-              // turn and settled its durable claim before returning success.
-              state.count += 1;
-              manualHeartbeatCycle = true;
-              state.logicPhase = "monitoring";
-              state.userInputBrief = "";
-              return latestMessageSnapshot("user");
-            }
-          } finally {
-            if (userInputDelivery === delivery) userInputDelivery = null;
-            if (state.running && state.runId === runId && state.logicPhase === "sending_server_input") {
-              state.logicPhase = "waiting_user";
-              setDetail(previousDetail);
-            }
-          }
-        }
+        if (inputWaitHasReply(user, waiting)) return user;
+        // Server events, queued prompts, errors and conversation limits are
+        // not answers. Keep this wait and its phone notification intact.
         await sleep(POLL_MS);
       }
       return null;
@@ -4194,6 +4173,8 @@ ${LOGIC_START_PROMPT}
       while (response && state.running && state.runId === runId) {
         if (!await waitForLogicResume(runId)) return;
 
+        const inputResponse = pendingUserInputResponse();
+        if (response.connectionError && inputResponse) response = inputResponse;
         const timeoutContinuation = canContinueAfterDeliveryTimeout(response) ? response : null;
         if (response.connectionError) {
           if (!timeoutContinuation) {
@@ -4709,6 +4690,8 @@ ${LOGIC_START_PROMPT}
   }
 
   function stopForMaximumLength() {
+    if (state.mode === "logic" && state.logicPhase === "waiting_user"
+      && (serverInputWait?.runId === state.runId || pendingUserInputResponse())) return publicStatus();
     if (state.mode === "logic" && state.logicPhase === "rolling_over") {
       return publicStatus();
     }

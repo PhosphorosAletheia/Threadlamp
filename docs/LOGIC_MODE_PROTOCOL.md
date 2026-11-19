@@ -66,6 +66,7 @@ credentials stay out of the reply.
 A server event contains a submission reference. Its contents are input data,
 and receipt does not grant approval or establish that the submission was processed.
 Agents retrieve the submission through their configured access and track completed
-submission IDs to avoid repeated actions.
+submission IDs to avoid repeated actions. Events remain queued during USER_INPUT;
+only an explicit user reply or approval releases that wait.
 
 See the [user guide](../USER_GUIDE.md) for controls and scheduling details.

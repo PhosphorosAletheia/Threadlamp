@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.21.5 beta 1
+
+- Keep USER_INPUT paused until an explicit user reply or approval. Server events stay queued instead of resuming the agent or clearing its phone notification.
+- Give an unanswered USER_INPUT tag priority over timeout continuation and conversation-limit recovery. Block automatic sends and handoffs while waiting, and distinguish message re-rendering from a new user reply using message IDs.
+
 ## 1.21.4 beta 1
 
 - Handle the first delivery timeout in a loaded chat as CONTINUE too. Send the normal configured follow-up without reloading first, while preserving queue handling, message limits, draft protection and send verification.

@@ -7,7 +7,7 @@
 const assert = require("node:assert/strict");
 const { fixture } = require("./delivery-timeout.test.js");
 const { sourceUrl } = require("./heartbeat.test.js");
-const { backgroundHarness } = require("./rollover.test.js");
+const { backgroundHarness, visibleElement } = require("./rollover.test.js");
 const event = { eventId: "form-1", submissionId: "submission-1", eventType: "form_submitted" };
 
 function prepare() {
@@ -36,109 +36,88 @@ function prepare() {
   });
 }
 async function tests() {
-  let f = prepare();
-  const click = f.send.click;
-  f.send.click = () => {
-    assert.equal(f.messages.some(r => r.type === "HA_CANCEL_REQUEST"), false,
-      "keep the phone request until the chat send is confirmed");
-    click();
-  };
-  await f.run();
-  assert.equal(f.sends.length, 1);
-  assert.ok(f.sends[0].includes('"submissionId":"submission-1"'));
-  assert.ok(f.sends[0].includes("check whether it answers your request"));
-  assert.equal(f.api.state.count, 1);
-  assert.equal(f.api.state.error, false);
-  const outcome = f.messages.findIndex(r => r.type === "SL_RESULT" && r.outcome === "delivered");
-  const cancel = f.messages.findIndex(r => r.type === "HA_CANCEL_REQUEST");
-  assert.ok(outcome >= 0 && cancel > outcome);
-  assert.equal(f.messages[cancel].requestId, "phone-request");
-  assert.equal(f.messages.filter(r => r.type === "HA_CANCEL_REQUEST").length, 1);
-
-  // Empty inboxes preserve the input wait. Duplicate wakes only signal its one runner.
-  f = prepare(); f.setPending(false);
-  let woke = false;
-  f.onTick(() => {
-    if (woke || f.api.state.logicPhase !== "waiting_user"
-      || !f.messages.some(r => r.type === "SL_TAKE")) return;
-    woke = true;
-    assert.equal(f.messages.some(r => r.type === "HA_CANCEL_REQUEST"), false);
-    assert.equal(f.api.acceptServerWake({ url: sourceUrl + "-wrong" }).accepted, false);
-    f.setPending(true);
-    assert.equal(f.api.acceptServerWake({ url: sourceUrl }).accepted, true);
-    assert.equal(f.api.acceptServerWake({ url: sourceUrl }).accepted, true);
-  });
-  await f.run();
-  assert.equal(woke, true);
-  assert.equal(f.sends.length, 1);
-
-  // Drafts, Pause, generation, and message limits leave the form queued.
-  for (const barrier of ["draft", "paused", "generating", "limit"]) {
+  let f;
+  for (const barrier of ["server-event", "queued", "timeout", "stream-error", "draft", "paused", "limit", "maximum-length", "maximum-before-pause", "rerender"]) {
     f = prepare();
-    Object.assign(f.api.state, { logicPhase: "waiting_user", homeAssistantRequestId: "phone-request" });
-    if (barrier === "draft") f.composer.innerText = f.composer.textContent = "My unfinished reply";
-    if (barrier === "paused") f.api.state.paused = true;
-    if (barrier === "generating") f.setSelector("button[data-testid='stop-button']", [f.composer]);
-    if (barrier === "limit") f.api.state.count = f.api.state.limit;
+    if (barrier === "queued") f.api.queueAdditionalPrompt("Keep queued instructions");
+    if (["timeout", "stream-error"].includes(barrier)) {
+      f.notice.getBoundingClientRect = () => ({width:100,height:40});
+      if (barrier === "stream-error") f.notice.textContent = "Error in message stream Retry";
+      f.setAlerts([f.notice]);
+    }
+    if (barrier === "maximum-before-pause") {
+      f.api.state.rolloverEnabled = true;
+      f.setAlerts([visibleElement("You have reached the maximum length for this conversation. Please start a new chat.")]);
+    }
     let ticks = 0;
     f.onTick(() => {
-      if (++ticks < 8) return;
+      if (f.api.state.logicPhase !== "waiting_user") return;
+      if (++ticks === 1) {
+        if (barrier === "draft") f.composer.innerText = "My unfinished reply";
+        if (barrier === "paused") f.api.state.paused = true;
+        if (barrier === "limit") f.api.state.count = f.api.state.limit;
+        if (barrier === "rerender") {
+          const replacement = {...f.user()};
+          f.api.setTimeoutSnapshotsForTest(role => {
+            const element = role === "user" ? replacement : f.assistant();
+            return {element, text:element.textContent};
+          });
+        }
+      }
+      assert.equal(f.api.acceptServerWake({url:sourceUrl}).accepted, false, barrier);
+      assert.equal(f.api.acceptServerWake({url:sourceUrl}).accepted, false, "duplicate wake is also blocked");
+      if (barrier === "maximum-length") {
+        f.api.state.rolloverEnabled = true;
+        const run = f.api.state.runId;
+        f.api.stopForMaximumLength();
+        assert.equal(f.api.state.runId, run);
+      }
+      if (ticks < 8) return;
+      assert.equal(f.api.state.logicPhase, "waiting_user", barrier);
       assert.equal(f.messages.some(r => r.type === "SL_TAKE"), false, barrier);
+      assert.equal(f.messages.some(r => /LR_PREPARE|LOGIC_ROLLOVER/.test(r.type)), false, barrier);
       assert.equal(f.messages.some(r => r.type === "HA_CANCEL_REQUEST"), false, barrier);
       f.api.state.running = false;
     });
-    await f.api.waitForServerOrUserInput(1, { element: f.user(), text: f.user().textContent });
-    assert.equal(f.sends.length, 0, barrier);
+    await f.run();
+    assert.equal(ticks, 8, barrier);
+    assert.deepEqual(f.sends, [], barrier);
+    if (barrier === "queued") assert.equal(f.api.getQueuedPromptForTest().text, "Keep queued instructions");
   }
 
-  // A phone reply arriving while a server event is being claimed cannot also send.
-  f = prepare();
-  f.onTake(async () => {
-    const result = await f.api.handleHomeAssistantResponse({
-      requestId: "phone-request", message: "Phone reply", tabUrl: sourceUrl
-    });
-    assert.equal(result.accepted, false);
-  });
-  await f.run();
-  assert.equal(f.sends.length, 1);
-  assert.ok(!f.sends[0].includes("Phone reply"));
+  // The send boundary rejects an automatic sender even if it calls directly.
+  f = prepare(); f.api.state.logicPhase = "waiting_user";
+  await assert.rejects(f.api.submitMessage(1, "Continue", "Automatic send"), /waiting for your reply/);
+  assert.deepEqual(f.sends, []);
 
-  // A phone send already in progress wins; the server event stays in the inbox.
-  f = prepare(); f.setPending(false);
-  let phone = null;
+  // An explicit phone reply is still allowed; events remain pending.
+  f = prepare();
+  let phone;
   f.onTick(() => {
-    if (phone || f.api.state.logicPhase !== "waiting_user"
-      || !f.messages.some(r => r.type === "SL_TAKE")) return;
-    phone = f.api.handleHomeAssistantResponse({
-      requestId: "phone-request", message: "Phone reply", tabUrl: sourceUrl
-    });
-    f.setPending(true);
-    f.api.acceptServerWake({ url: sourceUrl });
+    if (phone || f.api.state.logicPhase !== "waiting_user") return;
+    phone = f.api.handleHomeAssistantResponse({requestId:"phone-request",message:"Phone reply",tabUrl:sourceUrl});
+    assert.equal(f.api.acceptServerWake({url:sourceUrl}).accepted, false);
   });
   await f.run();
   assert.equal((await phone).accepted, true);
   assert.deepEqual(f.sends, ["Phone reply"]);
-  assert.equal(f.messages.some(r => r.type === "SL_RESULT"), false);
+  assert.equal(f.messages.some(r => r.type === "SL_TAKE" || r.type === "SL_RESULT"), false);
 
-  // A manual chat message wins without claiming or sending a form event.
+  // A real new chat message releases the wait, without taking a server event.
   f = prepare();
-  const previous = { element: f.user(), text: f.user().textContent };
-  f.newUser();
-  Object.assign(f.api.state, { logicPhase: "waiting_user" });
+  Object.assign(f.api.state, {logicPhase:"waiting_user"});
+  const previous = {element:f.user(),text:f.user().textContent};
+  f.onTick(() => f.newUser());
   assert.equal((await f.api.waitForServerOrUserInput(1, previous)).element, f.user());
   assert.equal(f.messages.some(r => r.type === "SL_TAKE"), false);
 
-  // Stopping/navigating while a claim is pending releases it without a send.
-  for (const interruption of ["stop", "navigate"]) {
-    f = prepare();
-    f.onTake(async () => {
-      if (interruption === "stop") f.api.stopLoop();
-      else f.window.location = new URL(sourceUrl + "-different");
-    });
-    await f.run();
-    assert.equal(f.sends.length, 0, interruption);
-    assert.ok(f.messages.some(r => r.type === "SL_RESULT" && r.outcome === "unsent"), interruption);
-  }
+  // An older USER_INPUT does not block a timeout on a newer, real user turn.
+  f = prepare(); f.newUser(); f.notice.rank = 5;
+  f.notice.getBoundingClientRect = () => ({width:100,height:40});
+  await f.run();
+  assert.equal(f.sends.length, 1);
+  assert.ok(f.sends[0].startsWith("Configured followup"));
+
   // The cancellation path clears only this request's notification on the phone.
   const background = await backgroundHarness();
   background.api.setConfigForTest({
@@ -159,6 +138,6 @@ async function tests() {
   });
   const otherCancelled = await background.dispatch({ type: "HA_CANCEL_REQUEST", requestId: "other-request" }, other);
   assert.equal(otherCancelled.removed, true, "the other agent's request was preserved");
-  console.log("server events satisfy USER_INPUT; drafts, pause, limits and competing replies remain protected");
+  console.log("USER_INPUT blocks server events, timeout continuation, rollover and DOM remounts; explicit replies remain available");
 }
 tests().catch(error => { console.error(error); process.exitCode = 1; });

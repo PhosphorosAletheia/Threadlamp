@@ -193,17 +193,14 @@ authentication checks.
 
 While working, an event is appended to the next eligible automatic prompt.
 While sleeping, an event starts a Logic Mode cycle and suspends heartbeat
-wakeups until IDLE. During an explicit `USER_INPUT` wait, a queued event can
-resume the same Logic Mode runner without an enabled heartbeat. It sends the
-submission reference and asks the agent to check whether the submission answers
-the request. The matching Home Assistant request is cancelled and its phone
-notification cleared after the event-bearing chat message is confirmed. Other
-chats' notifications are unaffected. Phone replies and server input share a
-send lock; duplicate wakes cannot start competing sends.
+wakeups until IDLE. During a `USER_INPUT` wait, server events remain queued and
+cannot resume the agent or dismiss its phone notification. Reply or approve
+explicitly in ChatGPT, the dashboard or the phone notification. Once the input
+request has been answered, events can accompany the next eligible automatic
+prompt or start a later sleeping cycle.
 
-Manual drafts, Pause, Stop, errors, and the message limit prevent event sends.
-Missing/invalid Logic flags and pauses caused by manual drafting do not gain this
-server-input behavior. Events never overwrite a draft or approve a request.
+Manual drafts, Pause, Stop, input waits, errors and the message limit prevent
+automatic event sends. Events never overwrite a draft or approve a request.
 Queued user instructions remain independent and can accompany the same send.
 
 Each event is claimed durably before editing the composer. It is marked delivered
