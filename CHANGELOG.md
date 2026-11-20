@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.21.6 beta 1
+
+- A linked server form can answer a USER_INPUT request. The agent receives the submission reference once delivery is confirmed. Queued dashboard instructions stay pending for a later turn.
+
 ## 1.21.5 beta 1
 
 - Keep USER_INPUT paused until an explicit user reply or approval. Server events stay queued instead of resuming the agent or clearing its phone notification.

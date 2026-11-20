@@ -20,7 +20,7 @@ a control marker:
 | Marker | Meaning |
 | --- | --- |
 | `[[LOGIC:CONTINUE]]` | Send the configured follow-up if eligible. |
-| `[[LOGIC:USER_INPUT]]` | Wait for your explicit reply or approval. |
+| `[[LOGIC:USER_INPUT]]` | Wait for your reply, including a form submitted through the connected server. |
 | `[[LOGIC:WAIT:15m]]` | Wait, then request status; whole minutes 1–120 are supported. |
 | `[[LOGIC:IDLE]]` | End this cycle and sleep until a heartbeat. |
 
@@ -36,11 +36,11 @@ disables its schedule; when needed it waits for a free composer and sends a
 shutdown instruction. It does not cancel an answer ChatGPT is already generating.
 Stopping a sleeping chat does not send that shutdown message.
 
-A **USER_INPUT** pause remains in place until you send a new chat message or
-explicitly reply or approve through the dashboard or phone. Queued messages,
-server events, heartbeats, timeout recovery and automatic new-chat handoffs do
-not answer that request. Server events stay queued. Toggling Pause/Resume or
-reattaching after an extension update preserves the unanswered input request.
+You can answer **USER_INPUT** in chat, through the dashboard or phone, or by
+submitting a form through the project's connected server. Threadlamp sends the
+submission reference to the waiting chat so the agent can read your answer.
+Ordinary queued prompts stay queued for a later automatic turn. Heartbeats,
+timeouts and automatic handoffs cannot answer an input request.
 
 ## Connection error recovery
 

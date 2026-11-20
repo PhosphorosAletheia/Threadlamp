@@ -36,9 +36,48 @@ function prepare() {
   });
 }
 async function tests() {
-  let f;
-  for (const barrier of ["server-event", "queued", "timeout", "stream-error", "draft", "paused", "limit", "maximum-length", "maximum-before-pause", "rerender"]) {
+  let f = prepare();
+  f.api.queueAdditionalPrompt("Keep this for the next automatic turn");
+  const click = f.send.click;
+  f.send.click = () => {
+    assert.equal(f.messages.some(r => r.type === "HA_CANCEL_REQUEST"), false,
+      "keep the phone request until the chat send is confirmed");
+    click();
+  };
+  await f.run();
+  assert.equal(f.sends.length, 1);
+  assert.ok(f.sends[0].includes('"submissionId":"submission-1"'));
+  assert.ok(f.sends[0].includes("check whether it answers your request"));
+  assert.equal(f.api.getQueuedPromptForTest().text, "Keep this for the next automatic turn");
+  assert.ok(!f.sends[0].includes("Keep this for the next automatic turn"));
+  assert.equal(f.api.state.count, 1);
+  assert.equal(f.api.state.error, false);
+  const outcome = f.messages.findIndex(r => r.type === "SL_RESULT" && r.outcome === "delivered");
+  const cancel = f.messages.findIndex(r => r.type === "HA_CANCEL_REQUEST");
+  assert.ok(outcome >= 0 && cancel > outcome);
+  assert.equal(f.messages[cancel].requestId, "phone-request");
+  assert.equal(f.messages.filter(r => r.type === "HA_CANCEL_REQUEST").length, 1);
+
+  // Empty inboxes preserve the input wait. Duplicate wakes only signal its one runner.
+  f = prepare(); f.setPending(false);
+  let woke = false;
+  f.onTick(() => {
+    if (woke || f.api.state.logicPhase !== "waiting_user"
+      || !f.messages.some(r => r.type === "SL_TAKE")) return;
+    woke = true;
+    assert.equal(f.messages.some(r => r.type === "HA_CANCEL_REQUEST"), false);
+    assert.equal(f.api.acceptServerWake({ url: sourceUrl + "-wrong" }).accepted, false);
+    f.setPending(true);
+    assert.equal(f.api.acceptServerWake({ url: sourceUrl }).accepted, true);
+    assert.equal(f.api.acceptServerWake({ url: sourceUrl }).accepted, true);
+  });
+  await f.run();
+  assert.equal(woke, true);
+  assert.equal(f.sends.length, 1);
+
+  for (const barrier of ["empty-inbox", "queued", "timeout", "stream-error", "draft", "paused", "limit", "maximum-length", "maximum-before-pause", "rerender"]) {
     f = prepare();
+    f.setPending(false);
     if (barrier === "queued") f.api.queueAdditionalPrompt("Keep queued instructions");
     if (["timeout", "stream-error"].includes(barrier)) {
       f.notice.getBoundingClientRect = () => ({width:100,height:40});
@@ -64,8 +103,6 @@ async function tests() {
           });
         }
       }
-      assert.equal(f.api.acceptServerWake({url:sourceUrl}).accepted, false, barrier);
-      assert.equal(f.api.acceptServerWake({url:sourceUrl}).accepted, false, "duplicate wake is also blocked");
       if (barrier === "maximum-length") {
         f.api.state.rolloverEnabled = true;
         const run = f.api.state.runId;
@@ -74,13 +111,13 @@ async function tests() {
       }
       if (ticks < 8) return;
       assert.equal(f.api.state.logicPhase, "waiting_user", barrier);
-      assert.equal(f.messages.some(r => r.type === "SL_TAKE"), false, barrier);
+      assert.equal(f.messages.some(r => r.type === "SL_RESULT"), false, barrier);
       assert.equal(f.messages.some(r => /LR_PREPARE|LOGIC_ROLLOVER/.test(r.type)), false, barrier);
       assert.equal(f.messages.some(r => r.type === "HA_CANCEL_REQUEST"), false, barrier);
       f.api.state.running = false;
     });
     await f.run();
-    assert.equal(ticks, 8, barrier);
+    assert.ok(ticks >= 8, barrier);
     assert.deepEqual(f.sends, [], barrier);
     if (barrier === "queued") assert.equal(f.api.getQueuedPromptForTest().text, "Keep queued instructions");
   }
@@ -90,24 +127,40 @@ async function tests() {
   await assert.rejects(f.api.submitMessage(1, "Continue", "Automatic send"), /waiting for your reply/);
   assert.deepEqual(f.sends, []);
 
-  // An explicit phone reply is still allowed; events remain pending.
+  // A phone reply arriving while a server event is being claimed cannot also send.
   f = prepare();
-  let phone;
+  f.onTake(async () => {
+    const result = await f.api.handleHomeAssistantResponse({
+      requestId: "phone-request", message: "Phone reply", tabUrl: sourceUrl
+    });
+    assert.equal(result.accepted, false);
+  });
+  await f.run();
+  assert.equal(f.sends.length, 1);
+  assert.ok(!f.sends[0].includes("Phone reply"));
+
+  // A phone send already in progress wins; the server event stays in the inbox.
+  f = prepare(); f.setPending(false);
+  let phone = null;
   f.onTick(() => {
-    if (phone || f.api.state.logicPhase !== "waiting_user") return;
-    phone = f.api.handleHomeAssistantResponse({requestId:"phone-request",message:"Phone reply",tabUrl:sourceUrl});
-    assert.equal(f.api.acceptServerWake({url:sourceUrl}).accepted, false);
+    if (phone || f.api.state.logicPhase !== "waiting_user"
+      || !f.messages.some(r => r.type === "SL_TAKE")) return;
+    phone = f.api.handleHomeAssistantResponse({
+      requestId: "phone-request", message: "Phone reply", tabUrl: sourceUrl
+    });
+    f.setPending(true);
+    f.api.acceptServerWake({ url: sourceUrl });
   });
   await f.run();
   assert.equal((await phone).accepted, true);
   assert.deepEqual(f.sends, ["Phone reply"]);
-  assert.equal(f.messages.some(r => r.type === "SL_TAKE" || r.type === "SL_RESULT"), false);
+  assert.equal(f.messages.some(r => r.type === "SL_RESULT"), false);
 
   // A real new chat message releases the wait, without taking a server event.
   f = prepare();
   Object.assign(f.api.state, {logicPhase:"waiting_user"});
   const previous = {element:f.user(),text:f.user().textContent};
-  f.onTick(() => f.newUser());
+  f.newUser();
   assert.equal((await f.api.waitForServerOrUserInput(1, previous)).element, f.user());
   assert.equal(f.messages.some(r => r.type === "SL_TAKE"), false);
 
@@ -138,6 +191,6 @@ async function tests() {
   });
   const otherCancelled = await background.dispatch({ type: "HA_CANCEL_REQUEST", requestId: "other-request" }, other);
   assert.equal(otherCancelled.removed, true, "the other agent's request was preserved");
-  console.log("USER_INPUT blocks server events, timeout continuation, rollover and DOM remounts; explicit replies remain available");
+  console.log("USER_INPUT accepts linked form replies and preserves other pause protections");
 }
 tests().catch(error => { console.error(error); process.exitCode = 1; });

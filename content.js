@@ -1711,9 +1711,14 @@ ${LOGIC_START_PROMPT}
 
   function acceptServerWake(request) {
     if (!controllerLive() || state.logicPhase === "update_paused") return {accepted:false, blocked:true, detail:"Threadlamp reattached. Inspect the chat and resume Logic Mode manually."};
-    if (state.logicPhase === "waiting_user" || pendingUserInputResponse()) {
-      return {accepted: false, blocked: true, detail: "Waiting for your reply. Server events remain queued until you respond."};
+    if (state.logicPhase === "waiting_user") {
+      const waiting = serverInputWait;
+      if (!waiting || waiting.runId !== state.runId || !state.running || state.mode !== "logic"
+        || waiting.url !== window.location.href || request.url !== waiting.url.split(/[?#]/)[0].replace(/\/$/, "")) return {accepted:false};
+      waiting.pending = true;
+      return {accepted:true};
     }
+    if (pendingUserInputResponse()) return {accepted:false};
     if (serverSetup || request.url !== window.location.href.split(/[?#]/)[0]
       || state.mode !== "logic" || !state.running || state.logicPhase !== "sleeping"
       || state.paused || state.error || isGenerating() || composerText(findComposer())
@@ -2374,7 +2379,7 @@ ${LOGIC_START_PROMPT}
           && latestMessageSnapshot("user").element === state.homeAssistantBaselineUserElement
           && !composerText(composer)
         ),
-        10000
+        10000, null, false, false, null, delivery
       );
       if (!sent || state.runId !== runId) {
         setDetail(
@@ -3539,9 +3544,11 @@ ${LOGIC_START_PROMPT}
     sendGuard = null,
     includeQueuedPrompt = false,
     requireServerEvent = false,
-    heartbeatHandoff = null
+    heartbeatHandoff = null,
+    inputDelivery = null
   ) {
-    if (state.logicPhase === "waiting_user" && userInputDelivery?.runId !== runId) {
+    const ownsInputDelivery = () => inputDelivery && inputDelivery === userInputDelivery && inputDelivery.runId === runId;
+    if (state.logicPhase === "waiting_user" && !ownsInputDelivery()) {
       throw new Error("This agent is waiting for your reply. Automatic sending is blocked.");
     }
     await queueStore.flush();
@@ -3573,7 +3580,7 @@ ${LOGIC_START_PROMPT}
       if (window.location.href !== serverUrl
         || snapshotChanged(latestMessageSnapshot("user"), serverUser)
         || state.paused || state.error || state.mode !== sendMode
-        || (state.logicPhase === "waiting_user" && userInputDelivery?.runId !== runId)
+        || (state.logicPhase === "waiting_user" && !ownsInputDelivery())
         || ((!expectedDraft || serverLease) && currentComposer !== composer)
         || !currentComposer || !composerDraftMatches(currentComposer, expectedDraft) || isGenerating()) {
         throw new Error("The chat or draft changed while preparing the automatic message. No message was sent.");
@@ -3587,8 +3594,9 @@ ${LOGIC_START_PROMPT}
       }
     };
     try {
-      if (includeQueuedPrompt && !serverSetup && state.mode === "logic"
-        && !["waiting_user", "stopping", "rolling_over"].includes(state.logicPhase)
+      if ((includeQueuedPrompt || requireServerEvent) && !serverSetup && state.mode === "logic"
+        && !["stopping", "rolling_over"].includes(state.logicPhase)
+        && (state.logicPhase !== "waiting_user" || (requireServerEvent && ownsInputDelivery()))
         && !state.error && !state.paused && typeof ServerLink !== "undefined" && ServerLink.projectId(serverUrl)) {
         const result = await serverMessage("SL_TAKE");
         if (result?.ok === false) throw new Error(result.error);
@@ -3877,7 +3885,7 @@ ${LOGIC_START_PROMPT}
   }
 
   async function waitForServerOrUserInput(runId, previousUser) {
-    const waiting = { runId, url: window.location.href, baseline: previousUser, userId: messageSnapshotId(previousUser) };
+    const waiting = { runId, url: window.location.href, pending: true, baseline: previousUser, userId: messageSnapshotId(previousUser) };
     serverInputWait = waiting;
     try {
       while (state.running && state.runId === runId) {
@@ -3885,8 +3893,30 @@ ${LOGIC_START_PROMPT}
         if (window.location.href !== waiting.url) throw new Error("The chat changed while waiting for input.");
         const user = latestMessageSnapshot("user");
         if (inputWaitHasReply(user, waiting)) return user;
-        // Server events, queued prompts, errors and conversation limits are
-        // not answers. Keep this wait and its phone notification intact.
+        if (waiting.pending && !state.paused && !state.error && !serverSetup && !userInputDelivery
+          && state.count < state.limit && !isGenerating() && !hasMaximumLengthNotice()
+          && !findConnectionErrorNotice() && !reconnectPageError()
+          && findComposer() && !composerText(findComposer())
+          && typeof ServerLink !== "undefined" && ServerLink.projectId(waiting.url)) {
+          waiting.pending = false;
+          const delivery = userInputDelivery = {runId};
+          const current = () => state.running && state.runId === runId && state.logicPhase === "waiting_user"
+            && window.location.href === waiting.url && !inputWaitHasReply(latestMessageSnapshot("user"), waiting)
+            && !state.paused && !state.error && !hasMaximumLengthNotice() && !findConnectionErrorNotice() && !reconnectPageError();
+          try {
+            const sent = await submitMessage(runId,
+              "A form submission arrived from this project's connected server. Retrieve the referenced submission and check whether it answers your request. If more input is needed, ask again. Follow the existing Logic Mode instructions.",
+              "Sending the server form submission as your reply…", current, 10000, current, false, true, null, delivery);
+            if (sent && state.running && state.runId === runId) {
+              state.count += 1;
+              manualHeartbeatCycle = true;
+              state.userInputBrief = "";
+              return latestMessageSnapshot("user");
+            }
+          } finally {
+            if (userInputDelivery === delivery) userInputDelivery = null;
+          }
+        }
         await sleep(POLL_MS);
       }
       return null;

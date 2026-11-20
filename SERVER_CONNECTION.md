@@ -193,15 +193,15 @@ authentication checks.
 
 While working, an event is appended to the next eligible automatic prompt.
 While sleeping, an event starts a Logic Mode cycle and suspends heartbeat
-wakeups until IDLE. During a `USER_INPUT` wait, server events remain queued and
-cannot resume the agent or dismiss its phone notification. Reply or approve
-explicitly in ChatGPT, the dashboard or the phone notification. Once the input
-request has been answered, events can accompany the next eligible automatic
-prompt or start a later sleeping cycle.
+wakeups until IDLE. During a `USER_INPUT` wait, a queued `form_submitted` event
+from the server assigned to that chat counts as a user reply. Threadlamp sends
+the submission reference and asks the agent to retrieve it and assess whether
+it answers the request. Confirmation in chat clears the matching phone
+notification. The agent can ask again if it needs more information.
 
-Manual drafts, Pause, Stop, input waits, errors and the message limit prevent
-automatic event sends. Events never overwrite a draft or approve a request.
-Queued user instructions remain independent and can accompany the same send.
+Manual drafts, manual Pause, Stop, errors and the message limit prevent
+automatic event sends. Queued dashboard instructions stay separate from a form
+reply and can accompany the next eligible automatic prompt.
 
 Each event is claimed durably before editing the composer. It is marked delivered
 only after a matching new user turn is observed. Failure before attempting Send
