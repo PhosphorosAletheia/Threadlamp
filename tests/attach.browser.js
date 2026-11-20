@@ -5,16 +5,36 @@
 "use strict";
 const fs=require("node:fs"),path=require("node:path"),os=require("node:os"),assert=require("node:assert/strict");
 const {spawn}=require("node:child_process"),{once}=require("node:events"),{WebSocket}=require("ws");
+const {createHelper} = require("../helper/server.js");
+const {init, reloadExtension} = require("../helper/cli.js");
+const net = require("node:net");
+async function freePort() {
+  const listener = net.createServer().listen(0,"127.0.0.1");
+  await once(listener,"listening");
+  const port = listener.address().port;
+  await new Promise(resolve => listener.close(resolve));
+  return port;
+}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),"threadlamp-attach-browser-")),root=path.resolve(__dirname,"..");
-  let browser,cdp;
+  let browser,cdp,helper;
   try {
     const extension=path.join(dir,"extension");fs.mkdirSync(extension);
     // Use exactly the release files, without copying private local state.
     for(const file of JSON.parse(fs.readFileSync(path.join(root,"release-files.json"))).extension){
       fs.mkdirSync(path.dirname(path.join(extension,file)),{recursive:true});fs.copyFileSync(path.join(root,file),path.join(extension,file));
     }
+    // Pre-grant loopback in the disposable manifest, equivalent to accepting the pairing prompt.
+    const manifestPath = path.join(extension,"manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath));
+    manifest.host_permissions.push("http://127.0.0.1/*");
+    fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+    const privateDir = path.join(dir,"helper");
+    init(privateDir,"127.0.0.1",await freePort(),await freePort());
+    const config = JSON.parse(fs.readFileSync(path.join(privateDir,"config.json")));
+    helper = createHelper(config,{key:fs.readFileSync(path.join(privateDir,"server-key.pem")),cert:fs.readFileSync(path.join(privateDir,"server-cert.pem"))});
+    await helper.start();
     const profile=path.join(dir,"profile");
     fs.mkdirSync(path.join(profile,"Default"),{recursive:true});
     fs.writeFileSync(path.join(profile,"Default","Preferences"),JSON.stringify({extensions:{ui:{developer_mode:true}}}));
@@ -56,6 +76,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
     } finally {await evaluate(w.sessionId,`chrome.tabs.sendMessage=globalThis.originalFixtureSend;delete globalThis.originalFixtureSend;true`);}
     const afterProbe=await send({type:"DB_SNAPSHOT"});
     assert.equal(afterProbe.instanceId,beforeProbe.instanceId);assert.equal(afterProbe.running,true);
+    const pairing = {type:"LAN_SAVE",enabled:true,port:config.bridgePort,token:config.bridgeToken};
+    assert.equal((await evaluate(settingsPage,`chrome.runtime.sendMessage(${JSON.stringify(pairing)})`)).ok,true);
+    await waitFor(async () => (await evaluate(settingsPage,'chrome.runtime.sendMessage({type:"LAN_GET"})')).phase === "connected","fixture helper paired");
     await call("Target.closeTarget",{targetId:settingsTarget});
     const snapshot=await send({type:"DB_SNAPSHOT"});
     const queued=await send({type:"DB_EXECUTE",commandId:"fixture-queue",action:"queue_append",target:{instanceId:snapshot.instanceId,url:snapshot.url,revision:snapshot.revision},payload:{text:"Invented queued instruction"}});
@@ -63,7 +86,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
     await evaluate(page,'document.querySelector("textarea").value="Unsaved fixture draft"; window.fixtureDocumentToken="unchanged"');
     const initialTicks=await evaluate(page,"window.fixtureTicks");
     for(let cycle=0;cycle<2;cycle++){
-      await evaluate(w.sessionId,"setTimeout(()=>chrome.runtime.reload(),50); true");
+      if (cycle === 0) assert.equal(await reloadExtension(config),manifest.version_name);
+      else await evaluate(w.sessionId,"setTimeout(()=>chrome.runtime.reload(),50); true");
       await sleep(500);w=await worker();
       await waitFor(async()=>{const s=await send({type:"DB_SNAPSHOT"});return s.logicPhase==="update_paused"&&s.instanceId!==snapshot.instanceId;},"automatic reattachment");
       const state=await send({type:"DB_SNAPSHOT"});assert.equal(state.running,false);assert.equal(state.paused,true);assert.equal(state.queuedPrompts.length,1);assert.equal(state.queuedPrompts[0].text,"Invented queued instruction");
@@ -102,5 +126,12 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
     await evaluate(page,'document.dispatchEvent(new Event("threadlamp:detach"))');
     await sleep(300);assert.equal(await evaluate(page,"window.fixtureSends"),0);
     console.log("PASS: lost ping preserves live controller; five real extension reloads; safe draft fallback, two automatic resumes, preserved manual pause, unchanged page and queue, no duplicate sends.");
-  }finally{cdp?.close();browser?.kill("SIGTERM");}
+  }finally{
+    cdp?.close();
+    if (browser && browser.exitCode === null && browser.signalCode === null) {
+      const stopped=once(browser,"exit"); browser.kill("SIGTERM"); await stopped;
+    }
+    if(helper) await helper.close();
+    await fs.promises.rm(dir,{recursive:true,force:true,maxRetries:15,retryDelay:200});
+  }
 })().catch(error=>{console.error(error);process.exitCode=1;});

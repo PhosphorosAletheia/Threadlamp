@@ -9,7 +9,7 @@ test("paired LAN worker revokes stale sockets and preserves dashboard identity c
     constructor(url){this.url=url;this.readyState=0;this.sent=[];sockets.push(this);}
     send(text){this.sent.push(JSON.parse(text));}
     close(){this.readyState=3;this.onclose?.();}
-    open(){this.readyState=1;this.onopen();}
+    open(){this.readyState=1;return this.onopen();}
     async receive(message){await this.onmessage({data:JSON.stringify(message)});}
   }
   const h=await harness({}, {configureContext:c=>{c.WebSocket=Socket;}});
@@ -18,7 +18,7 @@ test("paired LAN worker revokes stale sockets and preserves dashboard identity c
   assert.equal((await h.dispatch({type:"LAN_SAVE",enabled:true,token,port:3211},{id:"attacker",url:popup.url})).ok,false);
   assert.equal(sockets.length,0);
   const saved=await h.dispatch({type:"LAN_SAVE",enabled:true,token,port:3211});assert.equal(saved.ok,true);assert.equal(saved.token,undefined);
-  const socket=sockets[0];assert.equal(socket.url,"ws://127.0.0.1:3211/threadlamp/bridge");socket.open();
+  const socket=sockets[0];assert.equal(socket.url,"ws://127.0.0.1:3211/threadlamp/bridge");await socket.open();
   assert.equal(socket.sent[0].token,token);await socket.receive({type:"ready",protocol:1});
   assert.equal((await h.dispatch({type:"LAN_GET"})).phase,"connected");
   const snapshot={url:sourceUrl,instanceId:"agent-A",revision:"current",running:true,online:true};
@@ -35,7 +35,7 @@ test("paired LAN worker revokes stale sockets and preserves dashboard identity c
   await socket.receive({type:"request",id:"repeat",request});assert.equal(executed,1,"receipt prevents duplicate dispatch");
   await socket.receive({type:"request",id:"settings",request:{type:"HA_GET_SETTINGS"}});
   assert.deepEqual(Object.keys(socket.sent.at(-1).response).sort(),["approvalMessage","connection","enabled"]);
-  assert.deepEqual(socket.sent[0].capabilities,["diagnostics-v1"]);
+  assert.deepEqual(socket.sent[0].capabilities,["diagnostics-v1","reload-v1"]);
   await socket.receive({type:"request",id:"diagnostics",request:{type:"DG_EXPORT"}});
   assert.equal(socket.sent.at(-1).response.ok,true);
   assert.equal(socket.sent.at(-1).response.report.schema,1);
@@ -59,7 +59,7 @@ test("paired LAN worker revokes stale sockets and preserves dashboard identity c
   h.context.releaseInitialization();await waiting;assert.equal(executed,1);
   vm.runInContext("initializationPromise = previousInitialization",h.context);
   await socket.receive({type:"request",id:"old-socket",request});assert.equal(executed,1);
-  await h.dispatch({type:"LAN_SAVE",enabled:true});const next=sockets[1];next.open();await next.receive({type:"ready",protocol:1});
+  await h.dispatch({type:"LAN_SAVE",enabled:true});const next=sockets[1];await next.open();await next.receive({type:"ready",protocol:1});
   await next.receive({type:"request",id:"forbidden",request:{type:"SETTINGS_EXPORT"}});assert.equal(next.readyState,3);assert.equal(executed,1);
   await h.dispatch({type:"LAN_SAVE",enabled:false});
 });

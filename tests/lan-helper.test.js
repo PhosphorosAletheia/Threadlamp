@@ -3,7 +3,7 @@
 const test = require("node:test"), assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), https = require("node:https"), net = require("node:net");
 const {once} = require("node:events"), {WebSocket} = require("ws");
-const {init,privateHost} = require("../helper/cli.js"), {createHelper} = require("../helper/server.js");
+const {init,privateHost,reloadExtension} = require("../helper/cli.js"), {createHelper} = require("../helper/server.js");
 const protocol = require("../lan-protocol.js");
 async function freePort() { const server=net.createServer(); server.listen(0,"127.0.0.1"); await once(server,"listening"); const port=server.address().port; await new Promise(r=>server.close(r)); return port; }
 test("LAN helper authenticates, restricts authority, and never replays uncertain commands", async t => {
@@ -63,13 +63,14 @@ test("LAN helper authenticates, restricts authority, and never replays uncertain
   assert.equal((await req("/rpc",{type:"DB_COMMAND",action:"arbitrary"},cookie)).status,403);
   assert.equal((await req("/rpc",{type:"DB_LIST"},cookie,{Origin:"https://evil.example"})).status,403);
   assert.match((await req("/rpc",{type:"DB_LIST"},cookie)).text,/offline/);
-  async function connect(token=config.bridgeToken,capabilities=[]) {
+  async function connect(token=config.bridgeToken,capabilities=[],receipt={}) {
     const ws=new WebSocket(`ws://127.0.0.1:${bridgePort}/threadlamp/bridge`,{origin:`chrome-extension://${"a".repeat(32)}`});
     await once(ws,"open"); const result=Promise.race([once(ws,"message").then(([data])=>JSON.parse(data)),once(ws,"close").then(()=>null)]);
-    ws.send(JSON.stringify({type:"auth",protocol:1,token,capabilities}));return {ws,result:await result};
+    ws.send(JSON.stringify({type:"auth",protocol:1,token,capabilities,...receipt}));return {ws,result:await result};
   }
   const bad=await connect("x".repeat(43));assert.equal(bad.result,null);
   const first=await connect();assert.equal(first.result.type,"ready");
+  await assert.rejects(reloadExtension(config), /manually once/);
   const duplicate=await connect();assert.equal(duplicate.result,null,"a second bridge cannot replace the owner");
   let received=[];first.ws.on("message",data=>{const message=JSON.parse(data);received.push(message);if(message.request?.type==="DB_LIST")first.ws.send(JSON.stringify({type:"response",id:message.id,response:{ok:true,agents:[]}}));});
   assert.deepEqual(JSON.parse((await req("/rpc",{type:"DB_LIST"},cookie)).text),{ok:true,agents:[]});
@@ -95,6 +96,27 @@ test("LAN helper authenticates, restricts authority, and never replays uncertain
   assert.equal(fs.readFileSync(file,"utf8").includes("PRIVATE_DIAGNOSTIC_TEXT"),false);
   assert.equal((await req("/diagnostics/latest.json",undefined,cookie)).status,404,"no static diagnostic download bypasses authentication and RPC");
   const diagnosticClosed=once(diagnostic.ws,"close");diagnostic.ws.close();await diagnosticClosed;
+
+  const localUrl = `http://127.0.0.1:${bridgePort}/threadlamp/reload`;
+  assert.equal((await req("/threadlamp/reload",{},cookie)).status,404);
+  assert.equal((await req("/rpc",{type:"reload"},cookie)).status,403);
+  assert.equal((await fetch(localUrl,{headers:{Origin:config.origin}})).status,404);
+  await assert.rejects(reloadExtension(config), /offline/);
+  const capable = await connect(config.bridgeToken,["reload-v1"]);
+  await assert.rejects(reloadExtension({...config,bridgeToken:"wrong"}), /authentication failed/);
+  const incoming = once(capable.ws,"message");
+  let confirmed = false;
+  const reloaded = reloadExtension(config).then(version => { confirmed=true; return version; });
+  const command = JSON.parse((await incoming)[0]);
+  assert.equal(command.type,"reload");
+  await assert.rejects(reloadExtension(config), /Another extension reload/);
+  const disconnected = once(capable.ws,"close"); capable.ws.close(); await disconnected;
+  const ordinary = await connect(config.bridgeToken,["reload-v1"],{version:"1.0",completedReload:"unrelated"});
+  const gone = once(ordinary.ws,"close"); ordinary.ws.close(); await gone;
+  assert.equal(confirmed,false,"ordinary reconnection cannot confirm a requested reload");
+  const restarted = await connect(config.bridgeToken,["reload-v1"],{version:"1.2.3 beta 1",completedReload:command.id});
+  assert.equal(await reloaded,"1.2.3 beta 1");
+  restarted.ws.close();
 
   assert.equal((await req("/logout",{},cookie)).status,200);assert.equal((await req("/rpc",{type:"DB_LIST"},cookie)).status,401);
   for(let i=0;i<4;i++) await req("/login",{password:"incorrect"});

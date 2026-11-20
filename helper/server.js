@@ -27,6 +27,9 @@ function installableHtml(html) {
     .replace("</head>", '<link rel="manifest" href="/app.webmanifest"><meta name="theme-color" content="#090506"><link rel="stylesheet" href="/install.css"><script defer src="/install.js"></script></head>');
 }
 const cookieName = "__Host-threadlamp";
+function reloadProof(key, challenge) {
+  return crypto.createHmac("sha256", key).update("threadlamp-local-reload-v1:" + challenge).digest("hex");
+}
 function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000, diagnosticsDirectory = null, diagnosticsInterval = 30000} = {}) {
   const origin = new URL(config.origin);
   if (origin.protocol !== "https:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) throw new Error("A plain HTTPS dashboard origin is required.");
@@ -34,6 +37,13 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000, diag
   const sessions = new Map(), attempts = new Map(), pending = new Map();
   let peer = null, peerSeen = 0, closing = false, diagnosticPeer = null, diagnosticPoll = null, diagnosticBusy = false, diagnosticWarning = false, diagnosticTask = Promise.resolve();
   const peers = new Set();
+  let reloadChallenge = null, pendingReload = null;
+  function finishReload(result) {
+    if (!pendingReload) return;
+    clearTimeout(pendingReload.timer);
+    pendingReload.resolve(result);
+    pendingReload = null;
+  }
   const headers = {
     "Cache-Control":"no-store", "X-Content-Type-Options":"nosniff", "Referrer-Policy":"no-referrer",
     "Content-Security-Policy":"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
@@ -146,7 +156,30 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000, diag
   });
   web.requestTimeout = 45000; web.headersTimeout = 10000; web.keepAliveTimeout = 5000; web.maxHeadersCount = 50;
   web.on("tlsClientError", () => {});
-  const bridge = http.createServer((req,res) => { res.writeHead(404); res.end(); });
+  // This host-only route is deliberately separate from the LAN dashboard RPC.
+  const bridge = http.createServer(async (req,res) => {
+    if (req.url !== "/threadlamp/reload" || req.headers.host !== `127.0.0.1:${bridge.address().port}`
+      || req.headers.origin !== undefined || req.headers["sec-fetch-site"] !== undefined) return reply(res,404,{ok:false});
+    if (!["GET","POST"].includes(req.method)) return reply(res,405,{ok:false});
+    if (pendingReload) return reply(res,409,{ok:false,error:"Another extension reload is awaiting confirmation."});
+    if (!peer || peer.readyState !== WebSocket.OPEN || Date.now()-peerSeen > 45000)
+      return reply(res,503,{ok:false,error:"The paired extension is offline."});
+    if (!reloadChallenge) return reply(res,409,{ok:false,error:"Reload Threadlamp manually once to enable helper reloads."});
+    if (req.method === "GET") return reply(res,200,{challenge:reloadChallenge});
+    const proof = req.headers.authorization;
+    if (!equal(proof || "", "Bearer " + reloadProof(config.bridgeToken, reloadChallenge)))
+      return reply(res,403,{ok:false,error:"Reload authentication failed or the connection changed."});
+    const connection = peer, id = crypto.randomUUID();
+    reloadChallenge = token();
+    const result = new Promise(resolve => {
+      const timer = setTimeout(() => finishReload({ok:false,error:"Reload was requested. The restarted extension did not confirm within 60 seconds."}),60000);
+      pendingReload = {id, resolve, timer};
+    });
+    try { connection.send(JSON.stringify({type:"reload",id})); }
+    catch { finishReload({ok:false,error:"Could not deliver the reload request."}); }
+    const response = await result;
+    reply(res,response.ok ? 200 : 503,response);
+  });
   bridge.headersTimeout = 10000; bridge.requestTimeout = 10000;
   const wss = new WebSocketServer({noServer:true, maxPayload:protocol.responseLimit, perMessageDeflate:false});
   bridge.on("upgrade", (req,socket,head) => {
@@ -171,7 +204,12 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000, diag
         if (message.type !== "auth" || message.protocol !== protocol.protocol || typeof message.token !== "string"
           || !equal(message.token,config.bridgeToken) || peer) return ws.close();
         clearTimeout(authTimer); authenticated = true; peer = ws; peerSeen = Date.now();
+        reloadChallenge = Array.isArray(message.capabilities) && message.capabilities.includes("reload-v1") ? token() : null;
         ws.send(JSON.stringify({type:"ready",protocol:protocol.protocol}));
+        if (pendingReload && message.completedReload === pendingReload.id && reloadChallenge
+          && typeof message.version === "string" && /^[0-9][a-zA-Z0-9 .-]{0,63}$/.test(message.version)) {
+          finishReload({ok:true, version:message.version});
+        }
         // Older paired extensions do not advertise diagnostics and are never polled.
         if (diagnosticsDirectory && Array.isArray(message.capabilities) && message.capabilities.includes("diagnostics-v1")) {
           diagnosticPeer = ws;
@@ -208,6 +246,7 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000, diag
     server.once("error",failed); server.once("listening",ready); server.listen(port,host);
   });
   async function close() {
+    finishReload({ok:false,error:"Helper stopped before the reload was confirmed."});
     closing = true; clearInterval(reap); clearInterval(diagnosticPoll); rejectPending();
     for (const ws of peers) ws.terminate();
     await Promise.all([web,bridge].map(server => new Promise(resolve => {
@@ -224,4 +263,4 @@ function createHelper(config, tls, {rpcTimeout = 35000, authTimeout = 5000, diag
     } catch(error) { await close(); throw error; }
   }};
 }
-module.exports = {createHelper,hash};
+module.exports = {createHelper,hash,reloadProof};

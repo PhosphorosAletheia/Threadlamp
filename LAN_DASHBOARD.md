@@ -37,6 +37,16 @@ local bridge port and extension pairing token, then select **Save & connect**.
 Allow the requested loopback permission. The status should say the helper is
 connected. Pair only one Chrome profile to each helper.
 
+## Reload the paired extension
+
+From the host computer, run this in the source directory with the helper and Chrome running:
+
+```sh
+npm run lan -- reload-extension
+```
+
+Add `--dir <private-directory>` if you started the helper with a custom configuration directory. When upgrading from an earlier build, restart the helper and click **Reload** on Threadlamp in Chrome's Extensions page once. Future reloads use the command. It waits up to 60 seconds for the restarted extension to reconnect and report its running version. If confirmation times out, check Chrome and the helper connection before trying again.
+
 ## Connect from another device
 
 1. Open the HTTPS dashboard URL shown by setup.

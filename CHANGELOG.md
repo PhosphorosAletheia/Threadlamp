@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.21.8 beta 1
+
+- Reload the paired Chrome extension from the host with `npm run lan -- reload-extension`. The command reports the running version after the extension reconnects.
+
 ## 1.21.7 beta 1
 
 - Start or resume Logic Mode directly beside the selected agent’s status on the extension and LAN dashboards. Both controls use the settings in the Run tab.

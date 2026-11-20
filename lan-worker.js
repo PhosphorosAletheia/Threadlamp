@@ -4,6 +4,7 @@
 (() => {
   "use strict";
   const KEY = "threadlampLanBridge", ALARM = "threadlamp-lan-reconnect";
+  const RELOAD_RECEIPT = "threadlampHelperReloadReceipt";
   let settings = {enabled:false, port:3211, token:""}, socket = null, timer = null, retry = null;
   let generation = 0, phase = "disabled", detail = "LAN access is disabled.", lastSeen = 0;
   let configQueue = Promise.resolve();
@@ -25,9 +26,20 @@
     socket = ws; phase = "connecting"; detail = "Connecting to the local helper…"; lastSeen = Date.now();
     const current = () => socket === ws && epoch === generation && settings.enabled;
     let inFlight = 0;
-    ws.onopen = () => {
+    ws.onopen = async () => {
       if (!current()) return ws.close();
-      ws.send(JSON.stringify({type:"auth", protocol:LanProtocol.protocol, token:settings.token, capabilities:["diagnostics-v1"]}));
+      let completedReload;
+      try {
+        const [saved, session] = await Promise.all([
+          chrome.storage.local.get(RELOAD_RECEIPT), chrome.storage.session.get(RELOAD_RECEIPT)
+        ]);
+        // Session storage survives worker suspension but is cleared by an extension reload.
+        if (saved[RELOAD_RECEIPT] !== session[RELOAD_RECEIPT]) completedReload = saved[RELOAD_RECEIPT];
+      } catch { return ws.close(); }
+      if (!current() || ws.readyState !== WebSocket.OPEN) return;
+      const manifest = chrome.runtime.getManifest();
+      ws.send(JSON.stringify({type:"auth", protocol:LanProtocol.protocol, token:settings.token,
+        capabilities:["diagnostics-v1", "reload-v1"], completedReload, version:manifest.version_name || manifest.version}));
       timer = setInterval(() => {
         if (!current()) return;
         if (Date.now() - lastSeen > 45000) return ws.close();
@@ -44,6 +56,17 @@
         phase = "connected"; detail = "LAN helper connected. Authenticated dashboard controls are enabled."; return;
       }
       if (message.type === "pong") return;
+      if (phase === "reloading") return;
+      if (message.type === "reload" && phase === "connected" && typeof message.id === "string"
+        && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(message.id)) {
+        phase = "reloading";
+        try {
+          await chrome.storage.session.set({[RELOAD_RECEIPT]:message.id});
+          await chrome.storage.local.set({[RELOAD_RECEIPT]:message.id});
+          if (current() && ws.readyState === WebSocket.OPEN) chrome.runtime.reload();
+        } catch { ws.close(); }
+        return;
+      }
       if (phase !== "connected" || message.type !== "request" || typeof message.id !== "string" || message.id.length > 80
         || !LanProtocol.allowed(message.request) || inFlight >= 32) return ws.close();
       inFlight++;
