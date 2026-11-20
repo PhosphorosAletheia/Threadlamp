@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.21.7 beta 1
+
+- Start or resume Logic Mode directly beside the selected agent’s status on the extension and LAN dashboards. Both controls use the settings in the Run tab.
+
 ## 1.21.6 beta 1
 
 - A linked server form can answer a USER_INPUT request. The agent receives the submission reference once delivery is confirmed. Queued dashboard instructions stay pending for a later turn.

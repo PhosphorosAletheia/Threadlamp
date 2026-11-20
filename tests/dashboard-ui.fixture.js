@@ -114,6 +114,20 @@ function mock() {
       rewriteStatus.retryAt = 0; click("#refresh"); await wait();
       assert([...document.querySelectorAll(".rewrite-availability")].every(n => n.hidden && !n.textContent), "Expired cooldown disappears from all editors");
       assert(rewrites.length === 0, "Status refresh does not rewrite any draft");
+      const previousRun = agents[0];
+      agents[0] = {...previousRun, running:false, logicPhase:"idle", limit:0,
+        capabilities:{...caps, start_logic:true, resume_logic:true, pause:false}};
+      click("#refresh"); await wait();
+      await select(17);
+      for (const action of ["start_logic", "resume_logic"]) {
+        click(`.run-actions [data-action="${action}"]`); await wait();
+        const sent = actions.at(-1);
+        assert(sent.action === action && sent.target.tabId === 17, "Header control targets the selected agent");
+        assert(sent.payload.limit === 5 && sent.payload.message === "Continue", "Fresh chat has valid run settings");
+      }
+      agents[0] = previousRun;
+      click("#refresh"); await wait();
+      assert(!visible(document.querySelector(".run-actions [data-action=start_logic]")), "An active run cannot start twice");
       await select(17);
       assert($("agent-summary").textContent.includes("Reviewed three competitors"), "Selected agent displays its last output summary");
       assert($("agent-summary-meta").textContent.includes("CONTINUE"), "Summary includes ending Logic tag");

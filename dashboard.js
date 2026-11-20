@@ -140,7 +140,7 @@
     $("uncertain").hidden = true;
     const state = formState();
     $("message").value = state["run-form"]?.values.message ?? agent.message ?? "Continue";
-    $("limit").value = state["run-form"]?.values.limit ?? agent.limit ?? 5;
+    $("limit").value = state["run-form"]?.values.limit ?? (agent.limit || 5);
     $("rollover").checked = state["run-form"]?.values.rollover ?? agent.rolloverEnabled ?? true;
     $("queued").value = state["queue-form"]?.values.queued ?? "";
     $("reply").value = state["reply-form"]?.values.reply ?? "";
@@ -215,8 +215,9 @@
       button.title = !allowed ? "Unavailable in the agent's current state. Review its status above." : "";
       if (action === "heartbeat_run" && !allowed) button.title = "Requires an idle agent with an enabled heartbeat, no pause or error, and no unsent chat draft.";
       if (button.closest(".run-actions")) button.hidden = action === "heartbeat_run" ? !agent.online || !heartbeatIdle
-        : action === "resume" ? !agent.paused
-        : action === "pause" ? Boolean(agent.paused) : action === "next_cycle" ? !agent.capabilities?.next_cycle : false;
+        : ["start_logic", "resume_logic"].includes(action) ? !agent.online || agent.running
+        : action === "resume" ? !agent.running || !agent.paused
+        : action === "pause" ? !agent.running || Boolean(agent.paused) : action === "next_cycle" ? !agent.capabilities?.next_cycle : false;
     }
     $("server-host").disabled = busy || Boolean(connection) || inspectedKey !== selectedKey;
     $("open-chat").disabled = !agent.online;
@@ -456,7 +457,7 @@
     button.addEventListener("click", async () => {
       const agent = selected(); if (!agent) return;
       editorEpoch += 1;
-      const action = button.dataset.action, form = ["approve", "cancel_queue"].includes(action) ? null : button.closest("form");
+      const action = button.dataset.action, form = ["approve", "cancel_queue"].includes(action) ? null : button.form;
       const draft = form && formState()[form.id];
       const expected = draft?.target || target(agent);
       let payload = {};

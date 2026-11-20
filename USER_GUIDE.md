@@ -42,6 +42,12 @@ submission reference to the waiting chat so the agent can read your answer.
 Ordinary queued prompts stay queued for a later automatic turn. Heartbeats,
 timeouts and automatic handoffs cannot answer an input request.
 
+Select an agent on either dashboard to see its Logic Mode controls beside its
+status. **Start Logic Mode** sends the startup instructions. **Resume Logic
+Mode** watches the existing conversation, or unpauses a manually paused run.
+For a fresh or stopped run, adjust the follow-up message, message limit, and
+new-chat setting in the **Run** tab.
+
 ## Connection error recovery
 
 During an active Logic run, Threadlamp saves a temporary checkpoint for that tab

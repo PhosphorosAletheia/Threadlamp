@@ -110,7 +110,7 @@ h4 { font-size: 13px; font-weight: 650; }
 .pill.waiting { color: var(--warn); background: var(--warn-soft); }
 .pill.error { color: var(--error); background: #32161c; }
 .pill.offline { color: #c0c0c0; background: #272727; }
-.run-actions { margin-left: auto; display: flex; gap: 6px; }
+.run-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
 .run-actions button { min-height: 30px; padding: 4px 12px; font-size: 11px; }
 .status-detail { margin-top: 15px; font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; max-height: 90px; overflow: auto; }
 .status-meta { display: flex; gap: 16px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
